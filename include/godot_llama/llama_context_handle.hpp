@@ -1,0 +1,46 @@
+#pragma once
+
+#include "godot_llama/error.hpp"
+#include "godot_llama/llama_params.hpp"
+
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <vector>
+
+struct llama_context;
+
+namespace godot_llama {
+
+class LlamaModelHandle;
+
+class LlamaContextHandle {
+public:
+    LlamaContextHandle() noexcept = default;
+    ~LlamaContextHandle();
+
+    LlamaContextHandle(const LlamaContextHandle &) = delete;
+    LlamaContextHandle &operator=(const LlamaContextHandle &) = delete;
+    LlamaContextHandle(LlamaContextHandle &&other) noexcept;
+    LlamaContextHandle &operator=(LlamaContextHandle &&other) noexcept;
+
+    [[nodiscard]] static Error create(const std::shared_ptr<LlamaModelHandle> &model, const ModelConfig &config,
+                                      LlamaContextHandle &out);
+
+    [[nodiscard]] bool is_valid() const noexcept;
+    [[nodiscard]] llama_context *raw() const noexcept;
+    [[nodiscard]] const std::shared_ptr<LlamaModelHandle> &model() const noexcept;
+
+    [[nodiscard]] Error decode_tokens(std::span<const int32_t> tokens, int32_t pos_offset);
+    [[nodiscard]] float *get_logits(int32_t idx) const noexcept;
+    [[nodiscard]] float *get_embeddings() const noexcept;
+
+    void clear_kv_cache() noexcept;
+    [[nodiscard]] int32_t n_ctx() const noexcept;
+
+private:
+    llama_context *ctx_ = nullptr;
+    std::shared_ptr<LlamaModelHandle> model_;
+};
+
+} // namespace godot_llama
