@@ -1,0 +1,41 @@
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.pdb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Testing/
+
+# compile_commands.json is generated but useful - don't ignore it
+# compile_commands.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Models (never commit large binary model files)
+*.gguf
+*.bin
