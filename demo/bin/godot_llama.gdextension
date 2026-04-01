@@ -1,0 +1,12 @@
+[configuration]
+entry_symbol = "godot_llama_library_init"
+compatibility_minimum = "4.3"
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 = "res://bin/libgodot_llama.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://bin/libgodot_llama.linux.template_release.x86_64.so"
+windows.debug.x86_64 = "res://bin/libgodot_llama.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://bin/libgodot_llama.windows.template_release.x86_64.dll"
+macos.debug = "res://bin/libgodot_llama.macos.template_debug.universal.dylib"
+macos.release = "res://bin/libgodot_llama.macos.template_release.universal.dylib"
