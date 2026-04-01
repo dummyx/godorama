@@ -37,10 +37,15 @@ func _on_open_pressed() -> void:
 	var err = session.open(config)
 	if err != 0:
 		status_label.text = "Status: Failed to open (error %d)" % err
+		open_button.disabled = false
+		return
+
+	open_button.disabled = true
 
 func _on_opened() -> void:
 	status_label.text = "Status: Model loaded"
 	send_button.disabled = false
+	open_button.disabled = false
 
 func _on_send_pressed() -> void:
 	if not session.is_open():
@@ -65,6 +70,12 @@ func _on_completed(request_id: int, _text: String, stats: Dictionary) -> void:
 		send_button.disabled = false
 
 func _on_failed(request_id: int, error_code: int, error_message: String, _details: String) -> void:
+	if request_id == 0:
+		status_label.text = "Status: Open failed %d - %s" % [error_code, error_message]
+		send_button.disabled = true
+		open_button.disabled = false
+		return
+
 	if request_id == current_request_id:
 		status_label.text = "Status: Error %d - %s" % [error_code, error_message]
 		send_button.disabled = false

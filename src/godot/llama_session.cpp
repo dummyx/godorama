@@ -17,6 +17,7 @@ void LlamaSession::_bind_methods() {
     ClassDB::bind_method(D_METHOD("open", "config"), &LlamaSession::open);
     ClassDB::bind_method(D_METHOD("close"), &LlamaSession::close);
     ClassDB::bind_method(D_METHOD("is_open"), &LlamaSession::is_open);
+    ClassDB::bind_method(D_METHOD("is_opening"), &LlamaSession::is_opening);
     ClassDB::bind_method(D_METHOD("generate_async", "prompt", "options"), &LlamaSession::generate_async,
                          DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("cancel", "request_id"), &LlamaSession::cancel);
@@ -37,7 +38,8 @@ void LlamaSession::_bind_methods() {
 }
 
 int LlamaSession::open(const Ref<Resource> &config) {
-    if (is_open_) {
+    if (is_open_.load(std::memory_order_acquire) || is_opening_.load(std::memory_order_acquire) ||
+        !open_thread_finished_.load(std::memory_order_acquire)) {
         UtilityFunctions::push_error("LlamaSession: already open, call close() first");
         return static_cast<int>(godot_llama::ErrorCode::AlreadyOpen);
     }
@@ -48,63 +50,109 @@ int LlamaSession::open(const Ref<Resource> &config) {
     }
 
     auto internal_config = to_internal_config(config);
+    is_opening_.store(true, std::memory_order_release);
+    open_thread_finished_.store(false, std::memory_order_release);
+    const uint64_t open_generation = open_generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-    // Load model (this is blocking — for production use, consider loading on a thread)
-    std::shared_ptr<godot_llama::LlamaModelHandle> model;
-    auto load_err = godot_llama::LlamaModelHandle::load(internal_config, model);
-    if (load_err) {
-        UtilityFunctions::push_error(String("LlamaSession: ") + load_err.message.c_str());
-        emit_signal("failed", 0, static_cast<int>(load_err.code), String(load_err.message.c_str()),
-                    String(load_err.context.c_str()));
-        return static_cast<int>(load_err.code);
-    }
+    open_thread_ = std::jthread([this, internal_config, open_generation](std::stop_token stop_token) {
+        std::shared_ptr<godot_llama::LlamaModelHandle> model;
+        const auto load_err = godot_llama::LlamaModelHandle::load(internal_config, model);
 
-    // Set up callbacks that queue events for main-thread delivery
-    godot_llama::RequestCallbacks cbs;
-    cbs.on_token = [this](const godot_llama::TokenEvent &ev) {
-        std::lock_guard lock(event_mutex_);
-        token_events_.push_back({ev.request_id, String(ev.text.c_str()), ev.token_id});
-    };
-    cbs.on_complete = [this](const godot_llama::GenerateResult &res) {
-        Dictionary stats;
-        stats["tokens_generated"] = res.tokens_generated;
-        stats["time_ms"] = res.time_ms;
-        stats["tokens_per_second"] = res.tokens_per_second;
+        if (load_err) {
+            if (!is_stale_open_generation(open_generation) && !stop_token.stop_requested()) {
+                enqueue_open_failed_event(load_err);
+            }
+            finalize_open_thread();
+            return;
+        }
 
-        std::lock_guard lock(event_mutex_);
-        complete_events_.push_back({res.request_id, String(res.full_text.c_str()), stats});
-    };
-    cbs.on_error = [this](const godot_llama::ErrorEvent &ev) {
-        std::lock_guard lock(event_mutex_);
-        error_events_.push_back(
-                {ev.request_id, static_cast<int>(ev.code), String(ev.message.c_str()), String(ev.details.c_str())});
-    };
-    cbs.on_cancelled = [this](godot_llama::RequestId id) {
-        std::lock_guard lock(event_mutex_);
-        cancel_events_.push_back({id});
-    };
+        if (is_stale_open_generation(open_generation) || stop_token.stop_requested()) {
+            finalize_open_thread();
+            return;
+        }
 
-    auto start_err = worker_->start(std::move(model), internal_config, std::move(cbs));
-    if (start_err) {
-        UtilityFunctions::push_error(String("LlamaSession: ") + start_err.message.c_str());
-        return static_cast<int>(start_err.code);
-    }
+        godot_llama::RequestCallbacks cbs;
+        cbs.on_token = [this](const godot_llama::TokenEvent &ev) {
+            std::lock_guard lock(event_mutex_);
+            token_events_.push_back({ev.request_id, String(ev.text.c_str()), ev.token_id});
+        };
+        cbs.on_complete = [this](const godot_llama::GenerateResult &res) {
+            Dictionary stats;
+            stats["tokens_generated"] = res.tokens_generated;
+            stats["time_ms"] = res.time_ms;
+            stats["tokens_per_second"] = res.tokens_per_second;
 
-    is_open_ = true;
-    emit_signal("opened");
+            std::lock_guard lock(event_mutex_);
+            complete_events_.push_back({res.request_id, String(res.full_text.c_str()), stats});
+        };
+        cbs.on_error = [this](const godot_llama::ErrorEvent &ev) {
+            std::lock_guard lock(event_mutex_);
+            error_events_.push_back(
+                    {ev.request_id, static_cast<int>(ev.code), String(ev.message.c_str()), String(ev.details.c_str())});
+        };
+        cbs.on_cancelled = [this](godot_llama::RequestId id) {
+            std::lock_guard lock(event_mutex_);
+            cancel_events_.push_back({id});
+        };
+
+        {
+            std::lock_guard lock(state_mutex_);
+            if (is_stale_open_generation(open_generation) || stop_token.stop_requested()) {
+                finalize_open_thread();
+                return;
+            }
+
+            const auto start_err = worker_->start(std::move(model), internal_config, std::move(cbs));
+            if (start_err) {
+                enqueue_open_failed_event(start_err);
+                finalize_open_thread();
+                return;
+            }
+
+            is_open_.store(true, std::memory_order_release);
+        }
+
+        if (is_stale_open_generation(open_generation) || stop_token.stop_requested()) {
+            std::lock_guard lock(state_mutex_);
+            if (is_open_.exchange(false, std::memory_order_acq_rel)) {
+                worker_->stop();
+            }
+            finalize_open_thread();
+            return;
+        }
+
+        enqueue_opened_event();
+        finalize_open_thread();
+    });
+
     return static_cast<int>(godot_llama::ErrorCode::Ok);
 }
 
 void LlamaSession::close() {
-    if (!is_open_) {
+    open_generation_.fetch_add(1, std::memory_order_acq_rel);
+    is_opening_.store(false, std::memory_order_release);
+
+    if (open_thread_.joinable()) {
+        open_thread_.request_stop();
+        if (open_thread_finished_.load(std::memory_order_acquire)) {
+            open_thread_.join();
+        }
+    }
+
+    std::lock_guard lock(state_mutex_);
+    if (!is_open_.exchange(false, std::memory_order_acq_rel)) {
         return;
     }
+
     worker_->stop();
-    is_open_ = false;
 }
 
 bool LlamaSession::is_open() const {
-    return is_open_;
+    return is_open_.load(std::memory_order_acquire);
+}
+
+bool LlamaSession::is_opening() const {
+    return is_opening_.load(std::memory_order_acquire);
 }
 
 int LlamaSession::generate_async(const String &prompt, const Dictionary &options) {
@@ -180,6 +228,7 @@ PackedFloat32Array LlamaSession::embed(const String &text) {
 
 void LlamaSession::poll() {
     // Move events out of the lock to emit signals without holding the mutex
+    std::vector<QueuedOpenedEvent> opened;
     std::vector<QueuedTokenEvent> tokens;
     std::vector<QueuedCompleteEvent> completes;
     std::vector<QueuedErrorEvent> errors;
@@ -187,12 +236,16 @@ void LlamaSession::poll() {
 
     {
         std::lock_guard lock(event_mutex_);
+        opened.swap(opened_events_);
         tokens.swap(token_events_);
         completes.swap(complete_events_);
         errors.swap(error_events_);
         cancels.swap(cancel_events_);
     }
 
+    for (size_t i = 0; i < opened.size(); ++i) {
+        emit_signal("opened");
+    }
     for (const auto &ev : tokens) {
         emit_signal("token_emitted", ev.request_id, ev.text, ev.token_id);
     }
@@ -205,6 +258,29 @@ void LlamaSession::poll() {
     for (const auto &ev : cancels) {
         emit_signal("cancelled", ev.request_id);
     }
+
+    if (open_thread_.joinable() && open_thread_finished_.load(std::memory_order_acquire)) {
+        open_thread_.join();
+    }
+}
+
+void LlamaSession::enqueue_opened_event() {
+    std::lock_guard lock(event_mutex_);
+    opened_events_.push_back({});
+}
+
+void LlamaSession::enqueue_open_failed_event(const godot_llama::Error &error) {
+    std::lock_guard lock(event_mutex_);
+    error_events_.push_back({0, static_cast<int>(error.code), String(error.message.c_str()), String(error.context.c_str())});
+}
+
+void LlamaSession::finalize_open_thread() noexcept {
+    is_opening_.store(false, std::memory_order_release);
+    open_thread_finished_.store(true, std::memory_order_release);
+}
+
+bool LlamaSession::is_stale_open_generation(uint64_t generation) const noexcept {
+    return generation != open_generation_.load(std::memory_order_acquire);
 }
 
 godot_llama::ModelConfig LlamaSession::to_internal_config(const Ref<Resource> &config) const {

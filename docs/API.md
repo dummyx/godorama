@@ -27,9 +27,14 @@ Main interface for model interaction.
 
 #### `open(config: LlamaModelConfig) -> int`
 Loads a model and starts the inference worker.
-- **Blocks**: Yes (model loading)
+- **Blocks**: No
 - **Thread-safe**: No (call from main thread)
-- **Returns**: 0 on success, error code on failure
+- **Returns**: 0 if model loading was accepted, error code on immediate validation failure
+
+#### `is_opening() -> bool`
+Check if a background model load is currently in progress.
+- **Blocks**: No
+- **Thread-safe**: Yes
 
 #### `close()`
 Stops the worker and releases the model.

@@ -11,8 +11,11 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace godot {
@@ -36,6 +39,7 @@ public:
 
     // Non-blocking query.
     bool is_open() const;
+    bool is_opening() const;
 
     // Non-blocking: submits a generation request. Returns request_id.
     int generate_async(const String &prompt, const Dictionary &options = Dictionary());
@@ -61,8 +65,13 @@ protected:
 private:
     godot_llama::ModelConfig to_internal_config(const Ref<Resource> &config) const;
     godot_llama::GenerateOptions to_internal_options(const Dictionary &options) const;
+    void enqueue_opened_event();
+    void enqueue_open_failed_event(const godot_llama::Error &error);
+    void finalize_open_thread() noexcept;
+    [[nodiscard]] bool is_stale_open_generation(uint64_t generation) const noexcept;
 
     // Queued events for main-thread delivery
+    struct QueuedOpenedEvent {};
     struct QueuedTokenEvent {
         int request_id;
         String text;
@@ -84,13 +93,19 @@ private:
     };
 
     std::mutex event_mutex_;
+    std::vector<QueuedOpenedEvent> opened_events_;
     std::vector<QueuedTokenEvent> token_events_;
     std::vector<QueuedCompleteEvent> complete_events_;
     std::vector<QueuedErrorEvent> error_events_;
     std::vector<QueuedCancelEvent> cancel_events_;
 
+    mutable std::mutex state_mutex_;
     std::unique_ptr<godot_llama::InferenceWorker> worker_;
-    bool is_open_ = false;
+    std::jthread open_thread_;
+    std::atomic<bool> is_open_{false};
+    std::atomic<bool> is_opening_{false};
+    std::atomic<bool> open_thread_finished_{true};
+    std::atomic<uint64_t> open_generation_{0};
 };
 
 } // namespace godot
