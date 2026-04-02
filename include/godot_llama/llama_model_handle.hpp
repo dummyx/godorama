@@ -50,8 +50,10 @@ public:
 
     [[nodiscard]] int32_t n_ctx_train() const noexcept;
     [[nodiscard]] int32_t n_embd() const noexcept;
+    [[nodiscard]] int32_t n_embd_inp() const noexcept;
     [[nodiscard]] int32_t n_embd_out() const noexcept;
     [[nodiscard]] int32_t n_cls_out() const noexcept;
+    [[nodiscard]] int32_t n_vocab() const noexcept;
 
     [[nodiscard]] const ModelCapabilities &capabilities() const noexcept;
     [[nodiscard]] const std::string &descriptor() const noexcept;

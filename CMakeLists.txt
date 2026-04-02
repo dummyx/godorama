@@ -138,6 +138,7 @@ add_library(godot-llama-adapter STATIC
     src/llama/chat_template_engine.cpp
     src/llama/llama_model_handle.cpp
     src/llama/llama_context_handle.cpp
+    src/llama/llama_position_layout.cpp
     src/llama/llama_sampler_handle.cpp
     src/llama/llama_params.cpp
 )
@@ -219,6 +220,7 @@ set(GDEXTENSION_TARGET godot_llama)
 
 add_library(${GDEXTENSION_TARGET} SHARED
     src/godot/register_types.cpp
+    src/godot/llama_eval_session.cpp
     src/godot/llama_model_config.cpp
     src/godot/llama_session.cpp
     src/godot/rag_utils.cpp

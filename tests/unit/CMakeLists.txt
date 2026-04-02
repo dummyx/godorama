@@ -11,6 +11,7 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(godot_llama_tests
     test_chat_template_engine.cpp
+    test_llama_position_layout.cpp
     test_utf8.cpp
     test_error.cpp
     test_params.cpp

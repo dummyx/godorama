@@ -139,12 +139,21 @@ int32_t LlamaModelHandle::n_embd() const noexcept {
     return model_ ? llama_model_n_embd(model_) : 0;
 }
 
+int32_t LlamaModelHandle::n_embd_inp() const noexcept {
+    return model_ ? llama_model_n_embd_inp(model_) : 0;
+}
+
 int32_t LlamaModelHandle::n_embd_out() const noexcept {
     return model_ ? llama_model_n_embd_out(model_) : 0;
 }
 
 int32_t LlamaModelHandle::n_cls_out() const noexcept {
     return model_ ? static_cast<int32_t>(llama_model_n_cls_out(model_)) : 0;
+}
+
+int32_t LlamaModelHandle::n_vocab() const noexcept {
+    const auto *v = vocab();
+    return v ? llama_vocab_n_tokens(v) : 0;
 }
 
 const ModelCapabilities &LlamaModelHandle::capabilities() const noexcept {
