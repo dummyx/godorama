@@ -13,6 +13,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+option(GODOT_LLAMA_BUILD_GDEXTENSION "Build the Godot-facing GDExtension shared library" ON)
+
 # Note: exceptions/RTTI are disabled per-target for our own code only.
 # Third-party dependencies (llama.cpp, godot-cpp) need exceptions/RTTI enabled.
 
@@ -71,11 +73,9 @@ add_custom_command(
     COMMAND
         ${CMAKE_COMMAND} -E make_directory ${SQLITE_BUILD_DIR}
     COMMAND
-        ${SQLITE_PREPARE_AMALGAMATION_COMMAND}
+        ${CMAKE_COMMAND} -E chdir ${SQLITE_BUILD_DIR} ${SQLITE_PREPARE_AMALGAMATION_COMMAND}
     COMMAND
-        ${SQLITE_GENERATE_AMALGAMATION_COMMAND}
-    WORKING_DIRECTORY
-        ${SQLITE_BUILD_DIR}
+        ${CMAKE_COMMAND} -E chdir ${SQLITE_BUILD_DIR} ${SQLITE_GENERATE_AMALGAMATION_COMMAND}
     DEPENDS
         ${SQLITE_SOURCE_DIR}/configure
         ${SQLITE_SOURCE_DIR}/Makefile.in
@@ -128,8 +128,20 @@ endif()
 
 add_subdirectory(thirdparty/llama.cpp EXCLUDE_FROM_ALL)
 
-# godot-cpp
-add_subdirectory(thirdparty/godot-cpp EXCLUDE_FROM_ALL)
+# godot-cpp (only required for the Godot wrapper target)
+if(GODOT_LLAMA_BUILD_GDEXTENSION)
+    if(TARGET godot-cpp)
+        set(GODOT_LLAMA_GODOT_CPP_TARGET godot-cpp)
+        set(GODOT_LLAMA_GODOT_CPP_PROPERTY_TARGET godot-cpp)
+    elseif(TARGET godot::cpp)
+        set(GODOT_LLAMA_GODOT_CPP_TARGET godot::cpp)
+        set(GODOT_LLAMA_GODOT_CPP_PROPERTY_TARGET godot::cpp)
+    else()
+        add_subdirectory(thirdparty/godot-cpp EXCLUDE_FROM_ALL)
+        set(GODOT_LLAMA_GODOT_CPP_TARGET godot-cpp)
+        set(GODOT_LLAMA_GODOT_CPP_PROPERTY_TARGET godot-cpp)
+    endif()
+endif()
 
 # ---- Internal libraries ----
 
@@ -159,6 +171,7 @@ set_target_properties(godot-llama-adapter PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
+add_library(godot_llama::adapter ALIAS godot-llama-adapter)
 
 # src/core/ — async runtime, errors, UTF-8 helpers
 add_library(godot-llama-core STATIC
@@ -181,6 +194,7 @@ set_target_properties(godot-llama-core PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
+add_library(godot_llama::core ALIAS godot-llama-core)
 
 # src/core/rag/ — local RAG runtime, persistence, retrieval, prompt packing
 add_library(godot-llama-rag STATIC
@@ -213,56 +227,60 @@ set_target_properties(godot-llama-rag PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
+add_library(godot_llama::rag ALIAS godot-llama-rag)
 
 # ---- GDExtension shared library ----
 
-set(GDEXTENSION_TARGET godot_llama)
+if(GODOT_LLAMA_BUILD_GDEXTENSION)
+    set(GDEXTENSION_TARGET godot_llama)
 
-add_library(${GDEXTENSION_TARGET} SHARED
-    src/godot/register_types.cpp
-    src/godot/llama_eval_session.cpp
-    src/godot/llama_model_config.cpp
-    src/godot/llama_session.cpp
-    src/godot/rag_utils.cpp
-    src/godot/rag_corpus_config.cpp
-    src/godot/rag_corpus.cpp
-    src/godot/rag_answer_session.cpp
-)
+    add_library(${GDEXTENSION_TARGET} SHARED
+        src/godot/register_types.cpp
+        src/godot/llama_eval_session.cpp
+        src/godot/llama_model_config.cpp
+        src/godot/llama_session.cpp
+        src/godot/rag_utils.cpp
+        src/godot/rag_corpus_config.cpp
+        src/godot/rag_corpus.cpp
+        src/godot/rag_answer_session.cpp
+    )
+    add_library(godot_llama::godot ALIAS ${GDEXTENSION_TARGET})
 
-target_include_directories(${GDEXTENSION_TARGET}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+    target_include_directories(${GDEXTENSION_TARGET}
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
 
-target_link_libraries(${GDEXTENSION_TARGET}
-    PRIVATE
-        godot-llama-core
-        godot-llama-rag
-        godot-cpp
-)
+    target_link_libraries(${GDEXTENSION_TARGET}
+        PRIVATE
+            godot-llama-core
+            godot-llama-rag
+            ${GODOT_LLAMA_GODOT_CPP_TARGET}
+    )
 
-# Match godot-cpp naming conventions
-get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)
-set_target_properties(${GDEXTENSION_TARGET} PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_VISIBILITY_PRESET hidden
-    PREFIX "lib"
-    OUTPUT_NAME "godot_llama${GODOTCPP_SUFFIX}"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo/bin/"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo/bin/"
-)
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    # Match godot-cpp naming conventions
+    get_target_property(GODOTCPP_SUFFIX ${GODOT_LLAMA_GODOT_CPP_PROPERTY_TARGET} GODOTCPP_SUFFIX)
     set_target_properties(${GDEXTENSION_TARGET} PROPERTIES
-        SUFFIX ""
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_VISIBILITY_PRESET hidden
+        PREFIX "lib"
+        OUTPUT_NAME "godot_llama${GODOTCPP_SUFFIX}"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo/bin/"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/demo/bin/"
+    )
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set_target_properties(${GDEXTENSION_TARGET} PROPERTIES
+            SUFFIX ""
+        )
+    endif()
+
+    target_compile_options(${GDEXTENSION_TARGET} PRIVATE
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>
     )
 endif()
-
-target_compile_options(${GDEXTENSION_TARGET} PRIVATE
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>
-)
 
 # ---- Tests ----
 
