@@ -12,6 +12,23 @@ TEST_CASE("Position layout defaults to linear positions for standard models", "[
     REQUIRE(normalized == std::vector<int32_t>({0, 1, 2, 3}));
 }
 
+TEST_CASE("Position layout expands default positions for 3-component M-RoPE", "[position_layout]") {
+    std::vector<int32_t> normalized;
+    const auto err = normalize_position_layout({}, 3, 3, normalized);
+
+    REQUIRE_FALSE(err);
+    REQUIRE(normalized == std::vector<int32_t>({0, 1, 2, 0, 1, 2, 0, 1, 2}));
+}
+
+TEST_CASE("Position layout expands base positions for 3-component M-RoPE", "[position_layout]") {
+    std::vector<int32_t> normalized;
+    const std::vector<int32_t> base_positions = {5, 6, 7};
+    const auto err = normalize_position_layout(base_positions, 3, 3, normalized);
+
+    REQUIRE_FALSE(err);
+    REQUIRE(normalized == std::vector<int32_t>({5, 6, 7, 5, 6, 7, 5, 6, 7}));
+}
+
 TEST_CASE("Position layout expands base positions for 4-component audio M-RoPE", "[position_layout]") {
     std::vector<int32_t> normalized;
     const std::vector<int32_t> base_positions = {5, 6, 7};
