@@ -17,6 +17,7 @@ struct ModelConfig {
     bool use_mmap = true;
     bool use_mlock = false;
     bool embeddings_enabled = false;
+    bool disable_thinking = false;
     std::string chat_template_override;
 };
 

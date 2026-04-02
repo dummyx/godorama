@@ -20,6 +20,8 @@ void LlamaSession::_bind_methods() {
     ClassDB::bind_method(D_METHOD("is_opening"), &LlamaSession::is_opening);
     ClassDB::bind_method(D_METHOD("generate_async", "prompt", "options"), &LlamaSession::generate_async,
                          DEFVAL(Dictionary()));
+    ClassDB::bind_method(D_METHOD("generate_messages_async", "messages", "options", "add_assistant_turn"),
+                         &LlamaSession::generate_messages_async, DEFVAL(Dictionary()), DEFVAL(true));
     ClassDB::bind_method(D_METHOD("cancel", "request_id"), &LlamaSession::cancel);
     ClassDB::bind_method(D_METHOD("tokenize", "text", "add_bos", "special"), &LlamaSession::tokenize, DEFVAL(false),
                          DEFVAL(false));
@@ -168,6 +170,29 @@ int LlamaSession::generate_async(const String &prompt, const Dictionary &options
     return worker_->submit(std::move(prompt_str), std::move(opts));
 }
 
+int LlamaSession::generate_messages_async(const Array &messages, const Dictionary &options, bool add_assistant_turn) {
+    if (!is_open_) {
+        UtilityFunctions::push_error("LlamaSession: not open");
+        return -1;
+    }
+
+    const auto internal_messages = to_internal_messages(messages);
+    if (internal_messages.empty()) {
+        UtilityFunctions::push_error("LlamaSession: messages must contain at least one valid {role, content} entry");
+        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    }
+
+    std::string prompt;
+    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt);
+    if (template_err) {
+        UtilityFunctions::push_error(String("LlamaSession generate_messages_async: ") + template_err.message.c_str());
+        return -static_cast<int>(template_err.code);
+    }
+
+    auto opts = to_internal_options(options);
+    return worker_->submit(std::move(prompt), std::move(opts));
+}
+
 void LlamaSession::cancel(int request_id) {
     if (is_open_) {
         worker_->cancel(static_cast<godot_llama::RequestId>(request_id));
@@ -301,6 +326,7 @@ godot_llama::ModelConfig LlamaSession::to_internal_config(const Ref<Resource> &c
     c.use_mmap = mc->get_use_mmap();
     c.use_mlock = mc->get_use_mlock();
     c.embeddings_enabled = mc->get_embeddings_enabled();
+    c.disable_thinking = mc->get_disable_thinking();
 
     auto tmpl_utf8 = mc->get_chat_template_override().utf8();
     c.chat_template_override = std::string(tmpl_utf8.get_data(), static_cast<size_t>(tmpl_utf8.length()));
@@ -341,6 +367,32 @@ godot_llama::GenerateOptions LlamaSession::to_internal_options(const Dictionary 
     }
 
     return opts;
+}
+
+std::vector<std::pair<std::string, std::string>> LlamaSession::to_internal_messages(const Array &messages) const {
+    std::vector<std::pair<std::string, std::string>> internal_messages;
+    internal_messages.reserve(static_cast<size_t>(messages.size()));
+
+    for (int i = 0; i < messages.size(); ++i) {
+        const Dictionary message = messages[i];
+        if (!message.has("role") || !message.has("content")) {
+            continue;
+        }
+
+        const String role = String(message["role"]).strip_edges();
+        const String content = String(message["content"]).strip_edges();
+        if (role.is_empty() || content.is_empty()) {
+            continue;
+        }
+
+        const auto role_utf8 = role.utf8();
+        const auto content_utf8 = content.utf8();
+        internal_messages.emplace_back(
+                std::string(role_utf8.get_data(), static_cast<size_t>(role_utf8.length())),
+                std::string(content_utf8.get_data(), static_cast<size_t>(content_utf8.length())));
+    }
+
+    return internal_messages;
 }
 
 } // namespace godot

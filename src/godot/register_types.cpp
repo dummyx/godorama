@@ -2,6 +2,9 @@
 
 #include "llama_model_config.hpp"
 #include "llama_session.hpp"
+#include "rag_answer_session.hpp"
+#include "rag_corpus.hpp"
+#include "rag_corpus_config.hpp"
 
 #include <llama.h>
 
@@ -27,6 +30,9 @@ void initialize_godot_llama_module(ModuleInitializationLevel p_level) {
 
     GDREGISTER_CLASS(LlamaModelConfig);
     GDREGISTER_CLASS(LlamaSession);
+    GDREGISTER_CLASS(RagCorpusConfig);
+    GDREGISTER_CLASS(RagCorpus);
+    GDREGISTER_CLASS(RagAnswerSession);
 }
 
 void uninitialize_godot_llama_module(ModuleInitializationLevel p_level) {

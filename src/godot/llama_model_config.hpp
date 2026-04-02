@@ -39,6 +39,9 @@ public:
     void set_embeddings_enabled(bool p_enabled);
     bool get_embeddings_enabled() const;
 
+    void set_disable_thinking(bool p_disable_thinking);
+    bool get_disable_thinking() const;
+
     void set_chat_template_override(const String &p_template);
     String get_chat_template_override() const;
 
@@ -55,6 +58,7 @@ private:
     bool use_mmap_ = true;
     bool use_mlock_ = false;
     bool embeddings_enabled_ = false;
+    bool disable_thinking_ = false;
     String chat_template_override_;
 };
 

@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -43,6 +44,8 @@ public:
 
     // Non-blocking: submits a generation request. Returns request_id.
     int generate_async(const String &prompt, const Dictionary &options = Dictionary());
+    int generate_messages_async(const Array &messages, const Dictionary &options = Dictionary(),
+                                bool add_assistant_turn = true);
 
     // Non-blocking: cancels a pending or in-progress generation.
     void cancel(int request_id);
@@ -65,6 +68,7 @@ protected:
 private:
     godot_llama::ModelConfig to_internal_config(const Ref<Resource> &config) const;
     godot_llama::GenerateOptions to_internal_options(const Dictionary &options) const;
+    std::vector<std::pair<std::string, std::string>> to_internal_messages(const Array &messages) const;
     void enqueue_opened_event();
     void enqueue_open_failed_event(const godot_llama::Error &error);
     void finalize_open_thread() noexcept;

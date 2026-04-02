@@ -13,11 +13,15 @@ add_executable(godot_llama_tests
     test_utf8.cpp
     test_error.cpp
     test_params.cpp
+    test_rag_types.cpp
+    test_rag_chunker.cpp
+    test_rag_retriever.cpp
 )
 
 target_link_libraries(godot_llama_tests
     PRIVATE
         godot-llama-core
+        godot-llama-rag
         Catch2::Catch2WithMain
 )
 

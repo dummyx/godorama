@@ -49,6 +49,9 @@ void InferenceWorker::stop() noexcept {
 
     // Cancel all pending requests
     std::lock_guard lock(mutex_);
+    if (active_request_) {
+        active_request_->cancel();
+    }
     for (auto &req : queue_) {
         req->cancel();
     }
@@ -62,8 +65,18 @@ bool InferenceWorker::is_running() const noexcept {
 }
 
 RequestId InferenceWorker::submit(std::string prompt, GenerateOptions options) {
+    const RequestId request_id = next_id_.fetch_add(1, std::memory_order_relaxed);
+    return submit_with_id(request_id, std::move(prompt), std::move(options));
+}
+
+RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options) {
+    RequestId observed = next_id_.load(std::memory_order_relaxed);
+    while (request_id >= observed &&
+           !next_id_.compare_exchange_weak(observed, request_id + 1, std::memory_order_relaxed)) {
+    }
+
     auto req = std::make_shared<GenerateRequest>();
-    req->id = next_id_.fetch_add(1, std::memory_order_relaxed);
+    req->id = request_id;
     req->prompt = std::move(prompt);
     req->options = std::move(options);
 
@@ -78,12 +91,25 @@ RequestId InferenceWorker::submit(std::string prompt, GenerateOptions options) {
 
 void InferenceWorker::cancel(RequestId id) noexcept {
     std::lock_guard lock(mutex_);
+    if (active_request_ && active_request_->id == id) {
+        active_request_->cancel();
+    }
     for (auto &req : queue_) {
         if (req->id == id) {
             req->cancel();
             break;
         }
     }
+}
+
+Error InferenceWorker::apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
+                                           bool add_assistant_turn, std::string &out_prompt) const {
+    if (!model_ || !model_->is_loaded()) {
+        return Error::make(ErrorCode::NotOpen, "Model is not loaded");
+    }
+
+    return model_->apply_chat_template(messages, add_assistant_turn, config_.chat_template_override,
+                                       config_.disable_thinking, out_prompt);
 }
 
 std::vector<int32_t> InferenceWorker::tokenize(std::string_view text, bool add_bos, bool special) const {
@@ -148,9 +174,16 @@ void InferenceWorker::run() {
 
             req = queue_.front();
             queue_.pop_front();
+            active_request_ = req;
         }
 
         if (req->is_cancelled()) {
+            {
+                std::lock_guard lock(mutex_);
+                if (active_request_ == req) {
+                    active_request_.reset();
+                }
+            }
             if (callbacks_.on_cancelled) {
                 callbacks_.on_cancelled(req->id);
             }
@@ -158,6 +191,11 @@ void InferenceWorker::run() {
         }
 
         process_request(*req);
+
+        std::lock_guard lock(mutex_);
+        if (active_request_ == req) {
+            active_request_.reset();
+        }
     }
 }
 

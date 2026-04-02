@@ -109,3 +109,65 @@ Emitted on generation failure.
 
 #### `cancelled(request_id: int)`
 Emitted when a generation request is cancelled.
+
+## RAG Additions
+
+### `RagCorpusConfig`
+
+Key properties:
+
+- `storage_path`
+- `chunk_size_tokens`
+- `chunk_overlap_tokens`
+- `normalize_embeddings`
+- `vector_metric`
+- `max_batch_texts`
+- `embedding_model_path`
+- `embedding_n_ctx`
+- `embedding_n_threads`
+- `enable_reranker`
+- `reranker_model_path`
+- `parser_mode`
+- `supported_extensions`
+
+### `RagCorpus`
+
+Key methods:
+
+- `open(config: RagCorpusConfig) -> int`
+- `close()`
+- `is_open() -> bool`
+- `upsert_text_async(source_id: String, text: String, metadata := {}) -> int`
+- `upsert_file_async(path: String, metadata := {}) -> int`
+- `delete_source_async(source_id: String) -> int`
+- `clear_async() -> int`
+- `rebuild_async() -> int`
+- `cancel_job(job_id: int)`
+- `retrieve_async(query: String, options := {}) -> int`
+- `get_stats() -> Dictionary`
+- `poll()`
+
+Signals:
+
+- `ingest_progress(job_id, done, total)`
+- `ingest_completed(job_id, stats)`
+- `retrieve_completed(request_id, hits, stats)`
+- `failed(request_id_or_job_id, error_code, error_message, details)`
+
+### `RagAnswerSession`
+
+Key methods:
+
+- `open_generation(config: LlamaModelConfig) -> int`
+- `close_generation()`
+- `is_generation_open() -> bool`
+- `answer_async(corpus: RagCorpus, question: String, retrieval_options := {}, generation_options := {}) -> int`
+- `cancel(request_id: int)`
+- `poll()`
+
+Signals:
+
+- `token_emitted(request_id, token_text, token_id)`
+- `completed(request_id, text, citations, stats)`
+- `failed(request_id, error_code, error_message, details)`
+- `cancelled(request_id)`

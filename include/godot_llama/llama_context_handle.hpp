@@ -31,9 +31,13 @@ public:
     [[nodiscard]] llama_context *raw() const noexcept;
     [[nodiscard]] const std::shared_ptr<LlamaModelHandle> &model() const noexcept;
 
+    [[nodiscard]] Error encode_tokens(std::span<const int32_t> tokens);
     [[nodiscard]] Error decode_tokens(std::span<const int32_t> tokens, int32_t pos_offset);
     [[nodiscard]] float *get_logits(int32_t idx) const noexcept;
     [[nodiscard]] float *get_embeddings() const noexcept;
+    [[nodiscard]] float *get_embeddings_ith(int32_t index) const noexcept;
+    [[nodiscard]] float *get_embeddings_seq(int32_t seq_id) const noexcept;
+    [[nodiscard]] int32_t pooling_type() const noexcept;
 
     void clear_kv_cache() noexcept;
     [[nodiscard]] int32_t n_ctx() const noexcept;

@@ -26,6 +26,85 @@ endif()
 
 # ---- Third-party dependencies ----
 
+# sqlite: generate the amalgamation from the pinned bundled source tree
+set(SQLITE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sqlite")
+set(SQLITE_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/thirdparty/sqlite")
+set(SQLITE_AMALGAMATION_C "${SQLITE_BUILD_DIR}/sqlite3.c")
+set(SQLITE_AMALGAMATION_H "${SQLITE_BUILD_DIR}/sqlite3.h")
+
+if(MSVC)
+    find_program(SQLITE_MAKE_TOOL nmake REQUIRED)
+    set(SQLITE_PREPARE_AMALGAMATION_COMMAND
+        ${CMAKE_COMMAND}
+        -E
+        echo
+        "Preparing bundled SQLite amalgamation with nmake"
+    )
+    set(SQLITE_GENERATE_AMALGAMATION_COMMAND
+        ${SQLITE_MAKE_TOOL}
+        /f
+        ${SQLITE_SOURCE_DIR}/Makefile.msc
+        TOP=${SQLITE_SOURCE_DIR}
+        sqlite3.c
+        sqlite3.h
+    )
+else()
+    find_program(SQLITE_MAKE_TOOL NAMES gmake make REQUIRED)
+    set(SQLITE_PREPARE_AMALGAMATION_COMMAND
+        ${CMAKE_COMMAND}
+        -E
+        env
+        CC=${CMAKE_C_COMPILER}
+        ${SQLITE_SOURCE_DIR}/configure
+    )
+    set(SQLITE_GENERATE_AMALGAMATION_COMMAND
+        ${SQLITE_MAKE_TOOL}
+        sqlite3.c
+        sqlite3.h
+    )
+endif()
+
+add_custom_command(
+    OUTPUT
+        ${SQLITE_AMALGAMATION_C}
+        ${SQLITE_AMALGAMATION_H}
+    COMMAND
+        ${CMAKE_COMMAND} -E make_directory ${SQLITE_BUILD_DIR}
+    COMMAND
+        ${SQLITE_PREPARE_AMALGAMATION_COMMAND}
+    COMMAND
+        ${SQLITE_GENERATE_AMALGAMATION_COMMAND}
+    WORKING_DIRECTORY
+        ${SQLITE_BUILD_DIR}
+    DEPENDS
+        ${SQLITE_SOURCE_DIR}/configure
+        ${SQLITE_SOURCE_DIR}/Makefile.in
+        ${SQLITE_SOURCE_DIR}/Makefile.msc
+        ${SQLITE_SOURCE_DIR}/main.mk
+        ${SQLITE_SOURCE_DIR}/manifest.uuid
+    COMMENT
+        "Generating bundled SQLite amalgamation"
+    VERBATIM
+)
+
+add_library(godot-llama-sqlite3 STATIC
+    ${SQLITE_AMALGAMATION_C}
+)
+target_include_directories(godot-llama-sqlite3
+    PUBLIC
+        ${SQLITE_BUILD_DIR}
+        ${SQLITE_SOURCE_DIR}/src
+)
+target_compile_definitions(godot-llama-sqlite3
+    PRIVATE
+        SQLITE_THREADSAFE=1
+        SQLITE_OMIT_LOAD_EXTENSION=1
+)
+set_target_properties(godot-llama-sqlite3 PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+add_library(SQLite::SQLite3 ALIAS godot-llama-sqlite3)
+
 # llama.cpp: build as static library, disable standalone extras
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
@@ -98,6 +177,38 @@ set_target_properties(godot-llama-core PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+# src/core/rag/ — local RAG runtime, persistence, retrieval, prompt packing
+add_library(godot-llama-rag STATIC
+    src/core/rag/types.cpp
+    src/core/rag/corpus.cpp
+    src/core/rag/deterministic_chunker.cpp
+    src/core/rag/llama_embedder.cpp
+    src/core/rag/sqlite_corpus_store.cpp
+    src/core/rag/dense_retriever.cpp
+    src/core/rag/noop_reranker.cpp
+    src/core/rag/grounded_context_packer.cpp
+    src/core/rag/mock_embedder.cpp
+    src/core/rag/factories.cpp
+)
+target_include_directories(godot-llama-rag
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(godot-llama-rag
+    PUBLIC
+        godot-llama-core
+        SQLite::SQLite3
+)
+target_compile_options(godot-llama-rag PRIVATE
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>
+)
+set_target_properties(godot-llama-rag PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
 # ---- GDExtension shared library ----
 
 set(GDEXTENSION_TARGET godot_llama)
@@ -106,6 +217,10 @@ add_library(${GDEXTENSION_TARGET} SHARED
     src/godot/register_types.cpp
     src/godot/llama_model_config.cpp
     src/godot/llama_session.cpp
+    src/godot/rag_utils.cpp
+    src/godot/rag_corpus_config.cpp
+    src/godot/rag_corpus.cpp
+    src/godot/rag_answer_session.cpp
 )
 
 target_include_directories(${GDEXTENSION_TARGET}
@@ -117,6 +232,7 @@ target_include_directories(${GDEXTENSION_TARGET}
 target_link_libraries(${GDEXTENSION_TARGET}
     PRIVATE
         godot-llama-core
+        godot-llama-rag
         godot-cpp
 )
 
@@ -149,6 +265,7 @@ option(GODOT_LLAMA_BUILD_TESTS "Build unit tests" OFF)
 if(GODOT_LLAMA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/unit)
+    add_subdirectory(tests/integration)
 endif()
 
 # ---- Format and lint targets ----

@@ -1,0 +1,2 @@
+llama.cpp provides local inference for GGUF models.
+This project embeds llama.cpp directly through libllama.

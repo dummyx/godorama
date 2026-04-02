@@ -31,7 +31,10 @@ public:
     [[nodiscard]] bool is_running() const noexcept;
 
     [[nodiscard]] RequestId submit(std::string prompt, GenerateOptions options);
+    [[nodiscard]] RequestId submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options);
     void cancel(RequestId id) noexcept;
+    [[nodiscard]] Error apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
+                                            bool add_assistant_turn, std::string &out_prompt) const;
 
     // Tokenize/detokenize are synchronous and safe to call from any thread.
     [[nodiscard]] std::vector<int32_t> tokenize(std::string_view text, bool add_bos, bool special) const;
@@ -52,6 +55,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::deque<std::shared_ptr<GenerateRequest>> queue_;
+    std::shared_ptr<GenerateRequest> active_request_;
     std::jthread thread_;
     std::atomic<bool> running_{false};
     std::atomic<RequestId> next_id_{1};

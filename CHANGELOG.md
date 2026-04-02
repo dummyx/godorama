@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2026-04-02
+
+### Added
+- first-class local RAG support
+- `RagCorpusConfig`, `RagCorpus`, and `RagAnswerSession` Godot classes
+- SQLite-backed persistent corpus storage with schema versioning
+- deterministic UTF-8 normalization and token-aware chunking
+- dedicated embedding pipeline through `libllama`
+- exact dense retrieval with metadata/source filtering, dedupe, and MMR
+- grounded prompt assembly with packed-chunk citations
+- mock-embedder-backed RAG unit tests and SQLite integration tests
+- offline evaluation executable and RAG documentation set
+- updated demo project with local corpus ingestion, retrieval preview, and streamed grounded answers
+
 ## [0.1.0] - 2026-04-01
 
 ### Added

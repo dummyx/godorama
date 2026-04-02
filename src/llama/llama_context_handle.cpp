@@ -81,6 +81,24 @@ const std::shared_ptr<LlamaModelHandle> &LlamaContextHandle::model() const noexc
     return model_;
 }
 
+Error LlamaContextHandle::encode_tokens(std::span<const int32_t> tokens) {
+    if (!ctx_) {
+        return Error::make(ErrorCode::NotOpen, "Context is not valid");
+    }
+
+    if (tokens.empty()) {
+        return Error::make_ok();
+    }
+
+    llama_batch batch = llama_batch_get_one(const_cast<int32_t *>(tokens.data()), static_cast<int32_t>(tokens.size()));
+    const int32_t result = llama_encode(ctx_, batch);
+    if (result != 0) {
+        return Error::make(ErrorCode::DecodeFailed, "llama_encode failed with code " + std::to_string(result));
+    }
+
+    return Error::make_ok();
+}
+
 Error LlamaContextHandle::decode_tokens(std::span<const int32_t> tokens, int32_t pos_offset) {
     if (!ctx_) {
         return Error::make(ErrorCode::NotOpen, "Context is not valid");
@@ -112,6 +130,24 @@ float *LlamaContextHandle::get_embeddings() const noexcept {
         return nullptr;
     }
     return llama_get_embeddings(ctx_);
+}
+
+float *LlamaContextHandle::get_embeddings_ith(int32_t index) const noexcept {
+    if (!ctx_) {
+        return nullptr;
+    }
+    return llama_get_embeddings_ith(ctx_, index);
+}
+
+float *LlamaContextHandle::get_embeddings_seq(int32_t seq_id) const noexcept {
+    if (!ctx_) {
+        return nullptr;
+    }
+    return llama_get_embeddings_seq(ctx_, seq_id);
+}
+
+int32_t LlamaContextHandle::pooling_type() const noexcept {
+    return ctx_ ? static_cast<int32_t>(llama_pooling_type(ctx_)) : LLAMA_POOLING_TYPE_NONE;
 }
 
 void LlamaContextHandle::clear_kv_cache() noexcept {

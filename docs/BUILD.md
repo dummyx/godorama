@@ -6,6 +6,7 @@
 - Ninja
 - C++20 compiler (GCC 13+, Clang 16+, MSVC 2022+)
 - Git (for submodules)
+- Tcl shell and `make`/`nmake` are required to generate the bundled SQLite amalgamation during the build
 
 ### Optional
 
@@ -26,6 +27,12 @@ git submodule update --init --recursive
 cmake --preset dev
 cmake --build --preset build-dev
 ctest --preset test-dev --output-on-failure
+```
+
+### RAG evaluation
+
+```sh
+./build/dev/tests/integration/godot_llama_rag_eval
 ```
 
 ### Release
@@ -64,6 +71,8 @@ cmake --build --preset build-dev --target lint           # clang-tidy
 - GDExtension library: `demo/bin/libgodot_llama.<platform>.<target>.<arch>.so|dll|dylib`
 - compile_commands.json: `build/dev/compile_commands.json`
 - Unit test binary: `build/dev/tests/unit/godot_llama_tests`
+- Integration test binary: `build/dev/tests/integration/godot_llama_rag_integration_tests`
+- Evaluation binary: `build/dev/tests/integration/godot_llama_rag_eval`
 
 ## GPU backends
 

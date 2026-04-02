@@ -11,7 +11,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="VBox" type="VBoxContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -23,30 +23,76 @@ offset_top = 16.0
 offset_right = -16.0
 offset_bottom = -16.0
 
-[node name="StatusLabel" type="Label" parent="VBoxContainer"]
+[node name="StatusLabel" type="Label" parent="VBox"]
 layout_mode = 2
-text = "Status: Not loaded"
+text = "Status: Closed"
 
-[node name="ModelPathInput" type="LineEdit" parent="VBoxContainer"]
-layout_mode = 2
-placeholder_text = "Path to .gguf model file..."
-
-[node name="OpenButton" type="Button" parent="VBoxContainer"]
-layout_mode = 2
-text = "Load Model"
-
-[node name="HBoxContainer" type="HBoxContainer" parent="VBoxContainer"]
+[node name="Paths" type="PanelContainer" parent="VBox"]
 layout_mode = 2
 
-[node name="PromptInput" type="LineEdit" parent="VBoxContainer/HBoxContainer"]
+[node name="Grid" type="GridContainer" parent="VBox/Paths"]
+layout_mode = 2
+columns = 2
+
+[node name="GenerationLabel" type="Label" parent="VBox/Paths/Grid"]
+layout_mode = 2
+text = "Generation model"
+
+[node name="GenerationModelInput" type="LineEdit" parent="VBox/Paths/Grid"]
+layout_mode = 2
+placeholder_text = "Path to generation .gguf"
+
+[node name="EmbeddingLabel" type="Label" parent="VBox/Paths/Grid"]
+layout_mode = 2
+text = "Embedding model"
+
+[node name="EmbeddingModelInput" type="LineEdit" parent="VBox/Paths/Grid"]
+layout_mode = 2
+placeholder_text = "Path to embedding .gguf"
+
+[node name="Controls" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="OpenButton" type="Button" parent="VBox/Controls"]
+layout_mode = 2
+text = "Open RAG"
+
+[node name="IngestButton" type="Button" parent="VBox/Controls"]
+layout_mode = 2
+text = "Ingest Fixtures"
+
+[node name="QuestionBox" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+
+[node name="QuestionInput" type="LineEdit" parent="VBox/QuestionBox"]
 layout_mode = 2
 size_flags_horizontal = 3
-placeholder_text = "Enter prompt..."
+placeholder_text = "Ask a grounded question about the fixture corpus..."
 
-[node name="SendButton" type="Button" parent="VBoxContainer/HBoxContainer"]
+[node name="AskButton" type="Button" parent="VBox/QuestionBox"]
 layout_mode = 2
-text = "Generate"
+text = "Ask"
 
-[node name="OutputLabel" type="RichTextLabel" parent="VBoxContainer"]
+[node name="CancelButton" type="Button" parent="VBox/QuestionBox"]
+layout_mode = 2
+text = "Cancel"
+
+[node name="Panes" type="HSplitContainer" parent="VBox"]
 layout_mode = 2
 size_flags_vertical = 3
+
+[node name="HitsPanel" type="PanelContainer" parent="VBox/Panes"]
+layout_mode = 2
+
+[node name="HitsLabel" type="RichTextLabel" parent="VBox/Panes/HitsPanel"]
+layout_mode = 2
+fit_content = true
+bbcode_enabled = true
+
+[node name="AnswerPanel" type="PanelContainer" parent="VBox/Panes"]
+layout_mode = 2
+
+[node name="AnswerLabel" type="RichTextLabel" parent="VBox/Panes/AnswerPanel"]
+layout_mode = 2
+fit_content = true
+bbcode_enabled = true

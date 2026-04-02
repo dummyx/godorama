@@ -43,6 +43,10 @@ void LlamaModelConfig::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_embeddings_enabled"), &LlamaModelConfig::get_embeddings_enabled);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "embeddings_enabled"), "set_embeddings_enabled", "get_embeddings_enabled");
 
+    ClassDB::bind_method(D_METHOD("set_disable_thinking", "disable_thinking"), &LlamaModelConfig::set_disable_thinking);
+    ClassDB::bind_method(D_METHOD("get_disable_thinking"), &LlamaModelConfig::get_disable_thinking);
+    ADD_PROPERTY(PropertyInfo(Variant::BOOL, "disable_thinking"), "set_disable_thinking", "get_disable_thinking");
+
     ClassDB::bind_method(D_METHOD("set_chat_template_override", "tmpl"), &LlamaModelConfig::set_chat_template_override);
     ClassDB::bind_method(D_METHOD("get_chat_template_override"), &LlamaModelConfig::get_chat_template_override);
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "chat_template_override"), "set_chat_template_override",
@@ -110,6 +114,13 @@ void LlamaModelConfig::set_embeddings_enabled(bool p_enabled) {
 }
 bool LlamaModelConfig::get_embeddings_enabled() const {
     return embeddings_enabled_;
+}
+
+void LlamaModelConfig::set_disable_thinking(bool p_disable_thinking) {
+    disable_thinking_ = p_disable_thinking;
+}
+bool LlamaModelConfig::get_disable_thinking() const {
+    return disable_thinking_;
 }
 
 void LlamaModelConfig::set_chat_template_override(const String &p_template) {
