@@ -17,7 +17,8 @@ Configuration resource for model loading. Can be created in the editor or from c
 | `use_mmap` | `bool` | `true` | Memory-map model file |
 | `use_mlock` | `bool` | `false` | Lock model in RAM |
 | `embeddings_enabled` | `bool` | `false` | Enable embedding extraction |
-| `chat_template_override` | `String` | `""` | Override model's chat template |
+| `disable_thinking` | `bool` | `false` | When using message templating, request the model's non-thinking path if the template supports it |
+| `chat_template_override` | `String` | `""` | Override the model chat template used by `generate_messages_async()` |
 
 ## LlamaSession (RefCounted)
 
@@ -51,6 +52,14 @@ Submits a generation request. Returns a `request_id` for tracking.
 - **Blocks**: No
 - **Thread-safe**: No (call from main thread)
 
+#### `generate_messages_async(messages: Array, options: Dictionary = {}, add_assistant_turn: bool = true) -> int`
+Submits a message-templated generation request. Each message must be a dictionary containing string `role` and `content` keys.
+- **Blocks**: No
+- **Thread-safe**: No (call from main thread)
+- **Notes**:
+  - Uses the full `llama.cpp` common-chat Jinja path.
+  - Honors `chat_template_override` and `disable_thinking` from `LlamaModelConfig`.
+
 #### `cancel(request_id: int)`
 Cancels a pending or in-progress generation request.
 - **Blocks**: No
@@ -76,6 +85,11 @@ Flushes queued events from the worker thread and emits signals.
 Must be called each frame (e.g., from `_process`).
 - **Blocks**: No
 - **Thread-safe**: No (main thread only)
+
+### Notes
+
+- `open()` is asynchronous. `opened()` or `failed()` arrives later through `poll()`.
+- `disable_thinking` only applies to the message-templated path. It does not rewrite raw prompt text passed to `generate_async()`.
 
 ### Generation Options Dictionary
 
@@ -109,6 +123,68 @@ Emitted on generation failure.
 
 #### `cancelled(request_id: int)`
 Emitted when a generation request is cancelled.
+
+## LlamaEvalSession (RefCounted)
+
+Async eval/prefill interface for callers that already have embedding inputs.
+
+### Methods
+
+#### `open(config: LlamaModelConfig) -> int`
+Loads a model/context asynchronously.
+- **Blocks**: No
+- **Thread-safe**: No
+
+#### `close()`
+Stops the eval worker and releases the model/context.
+- **Blocks**: Yes
+- **Thread-safe**: No
+
+#### `is_open() -> bool`
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `is_opening() -> bool`
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `run_prefill_async(inputs_embeds: PackedFloat32Array, sequence_length: int, position_ids: PackedInt32Array = [], position_components: int = 1, logit_start: int = 0, logit_count: int = 0, include_hidden_state: bool = true, clear_kv_cache: bool = true) -> int`
+Queues an embedding-prefill request and returns a `request_id`.
+- **Blocks**: No
+- **Thread-safe**: No
+- **Notes**:
+  - `inputs_embeds` must match `sequence_length * hidden_size`.
+  - `position_ids` may contain one or more position components per token. When only one base position per token is provided, `godorama` auto-expands layouts for 1-, 3-, and 4-component models.
+  - `logit_start` + `logit_count` select a returned slice of the final-step logits.
+  - `clear_kv_cache = true` makes each request independent by default.
+
+#### `cancel(request_id: int)`
+Cancels a queued or active eval request.
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `poll()`
+Flushes queued `opened` / `completed` / `failed` / `cancelled` signals to the main thread.
+- **Blocks**: No
+- **Thread-safe**: No
+
+### Signals
+
+#### `opened()`
+Emitted when the model/context is ready.
+
+#### `completed(request_id: int, result: Dictionary)`
+`result` currently contains:
+- `logits: PackedFloat32Array`
+- `logits_shape: PackedInt64Array`
+- `hidden_states: PackedFloat32Array` when `include_hidden_state = true`
+- `hidden_states_shape: PackedInt64Array` when `include_hidden_state = true`
+
+#### `failed(request_id: int, error_code: int, error_message: String, details: String)`
+Emitted on request failure or asynchronous open failure.
+
+#### `cancelled(request_id: int)`
+Emitted when a request is cancelled.
 
 ## RAG Additions
 

@@ -29,6 +29,14 @@ cmake --build --preset build-dev
 ctest --preset test-dev --output-on-failure
 ```
 
+If a sandboxed launcher interferes with `ctest`, run the binaries directly:
+
+```sh
+./build/dev/tests/unit/godot_llama_tests
+./build/dev/tests/integration/godot_llama_rag_integration_tests
+./build/dev/tests/integration/godot_llama_rag_eval
+```
+
 ### RAG evaluation
 
 ```sh
@@ -73,6 +81,13 @@ cmake --build --preset build-dev --target lint           # clang-tidy
 - Unit test binary: `build/dev/tests/unit/godot_llama_tests`
 - Integration test binary: `build/dev/tests/integration/godot_llama_rag_integration_tests`
 - Evaluation binary: `build/dev/tests/integration/godot_llama_rag_eval`
+
+## Runtime Integration Notes
+
+- `LlamaSession` and `LlamaEvalSession` both require `poll()` to flush queued signals on the Godot main thread.
+- `LlamaSession.open()` and `LlamaEvalSession.open()` are asynchronous.
+- Runtime log verbosity can be overridden with `GODORAMA_LLAMA_LOG_LEVEL=debug|info|warn|error|silent`.
+- Message-based chat generation uses the `llama.cpp` common-chat Jinja engine, not the limited `llama_chat_apply_template()` helper.
 
 ## GPU backends
 

@@ -21,6 +21,7 @@ predictable behavior, explicit ownership, and stable public interfaces.
 4. Keep `godot-cpp` and `llama.cpp` pinned to exact revisions.
 5. CPU-only support is mandatory. GPU backends are optional and feature-gated.
 6. No hidden downloads, no hidden telemetry, no hidden network access.
+7. Keep the public docs in sync with the shipped Godot API. If a bound method, signal, config property, or runtime contract changes, update `README.md` and the relevant file under `docs/` in the same change.
 
 ## Primary toolchain
 
@@ -62,6 +63,8 @@ Use this structure unless there is a compelling reason to change it:
 This layer is responsible for:
 - wrapping `llama_model`, `llama_context`, samplers, and request state
 - translating internal config types to `llama.cpp` params
+- owning chat templating through the `llama.cpp` common-chat path
+- normalizing eval-time position layouts and embedding-prefill behavior
 - shielding the rest of the repo from upstream API churn
 
 Rules:
@@ -69,6 +72,7 @@ Rules:
 - no Godot types
 - no editor/UI logic
 - no global mutable singleton state
+- do not regress to raw `llama_chat_apply_template()` when full Jinja/common-chat behavior is required
 
 ### `src/core/`
 This layer is responsible for:
@@ -97,6 +101,7 @@ Rules:
 - keep it thin
 - do not place inference business logic here
 - do not replicate `llama.cpp` parameter structures verbatim
+- `LlamaEvalSession` is part of the supported Godot surface; keep it generic and reusable rather than hard-coding one speech model's assumptions into the binding
 
 ## Dependency policy
 
@@ -143,6 +148,7 @@ Rules:
   - units/defaults for parameters
 - Avoid enormous option dictionaries unless there is no better Godot-friendly type.
 - Prefer a small config `Resource` for stable settings over a giant list of freeform arguments.
+- When the public API depends on `poll()`-driven delivery or asynchronous open semantics, state that explicitly in docs and tests.
 
 ## C++ design rules
 
@@ -199,6 +205,7 @@ type owned by this repo.
 - Do not use detached threads.
 - Do not invent ad-hoc thread pools without a strong reason.
 - Prefer `std::jthread` or a small well-defined worker abstraction with shutdown semantics.
+- Runtime logging and event delivery must stay readable under headless Godot smoke tests. Filter low-value native log spam instead of forcing downstream projects to patch around it.
 
 A synchronous API may exist internally for tests or low-level wrappers, but do not
 bind blocking editor-facing methods by default.
@@ -226,6 +233,7 @@ bind blocking editor-facing methods by default.
 - Benchmark hot paths before and after changing them.
 - Do not optimize speculative code paths without measurements.
 - Keep performance-sensitive logic out of the Godot glue layer.
+- When embeddings are enabled for eval-style paths, request the correct output rows up front instead of relying on `llama.cpp` warning-driven fallbacks.
 
 ## Godot-specific data handling
 
@@ -256,6 +264,14 @@ cmake --build --preset build-dev --target lint
 ````
 
 If these commands do not exist yet, create them.
+
+Additional verification that should remain easy to run:
+
+```sh
+./build/dev/tests/unit/godot_llama_tests
+```
+
+That direct binary path is useful when `ctest` itself is blocked by a sandbox or wrapper environment.
 
 ## CI rules
 
