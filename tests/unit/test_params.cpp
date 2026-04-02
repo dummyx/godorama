@@ -15,6 +15,7 @@ TEST_CASE("ModelConfig defaults", "[params]") {
     REQUIRE(config.use_mmap == true);
     REQUIRE(config.use_mlock == false);
     REQUIRE(config.embeddings_enabled == false);
+    REQUIRE(config.disable_thinking == false);
     REQUIRE(config.model_path.empty());
     REQUIRE(config.chat_template_override.empty());
 }

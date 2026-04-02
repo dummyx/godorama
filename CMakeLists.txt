@@ -107,7 +107,7 @@ add_library(SQLite::SQLite3 ALIAS godot-llama-sqlite3)
 
 # llama.cpp: build as static library, disable standalone extras
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON ON CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -135,18 +135,22 @@ add_subdirectory(thirdparty/godot-cpp EXCLUDE_FROM_ALL)
 
 # src/llama/ — thin adapter over libllama, no Godot headers
 add_library(godot-llama-adapter STATIC
+    src/llama/chat_template_engine.cpp
     src/llama/llama_model_handle.cpp
     src/llama/llama_context_handle.cpp
     src/llama/llama_sampler_handle.cpp
     src/llama/llama_params.cpp
 )
+if(NOT MSVC)
+    set_source_files_properties(src/llama/chat_template_engine.cpp PROPERTIES COMPILE_OPTIONS "-fexceptions")
+endif()
 target_include_directories(godot-llama-adapter
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
-target_link_libraries(godot-llama-adapter PUBLIC llama)
+target_link_libraries(godot-llama-adapter PUBLIC llama common)
 target_compile_options(godot-llama-adapter PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>
 )

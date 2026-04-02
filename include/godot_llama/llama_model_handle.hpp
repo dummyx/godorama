@@ -1,5 +1,6 @@
 #pragma once
 
+#include "godot_llama/chat_template_engine.hpp"
 #include "godot_llama/error.hpp"
 #include "godot_llama/llama_params.hpp"
 
@@ -70,6 +71,7 @@ public:
     [[nodiscard]] std::string token_to_piece(int32_t token) const;
 
 private:
+    [[nodiscard]] Error initialize_chat_template_engine(std::string_view template_override);
     void refresh_metadata_cache();
 
     llama_model *model_ = nullptr;
@@ -77,6 +79,8 @@ private:
     std::string descriptor_;
     std::string default_chat_template_;
     std::string fingerprint_;
+    std::string configured_chat_template_override_;
+    ChatTemplateEngine chat_template_engine_;
 };
 
 } // namespace godot_llama

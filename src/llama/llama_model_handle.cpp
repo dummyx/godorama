@@ -47,22 +47,37 @@ std::string llama_string_from_callback(const std::function<int32_t(char *, size_
 } // namespace
 
 LlamaModelHandle::~LlamaModelHandle() {
+    chat_template_engine_ = ChatTemplateEngine();
     if (model_) {
         llama_model_free(model_);
         model_ = nullptr;
     }
 }
 
-LlamaModelHandle::LlamaModelHandle(LlamaModelHandle &&other) noexcept : model_(other.model_) {
+LlamaModelHandle::LlamaModelHandle(LlamaModelHandle &&other) noexcept
+    : model_(other.model_),
+      capabilities_(other.capabilities_),
+      descriptor_(std::move(other.descriptor_)),
+      default_chat_template_(std::move(other.default_chat_template_)),
+      fingerprint_(std::move(other.fingerprint_)),
+      configured_chat_template_override_(std::move(other.configured_chat_template_override_)),
+      chat_template_engine_(std::move(other.chat_template_engine_)) {
     other.model_ = nullptr;
 }
 
 LlamaModelHandle &LlamaModelHandle::operator=(LlamaModelHandle &&other) noexcept {
     if (this != &other) {
+        chat_template_engine_ = ChatTemplateEngine();
         if (model_) {
             llama_model_free(model_);
         }
         model_ = other.model_;
+        capabilities_ = other.capabilities_;
+        descriptor_ = std::move(other.descriptor_);
+        default_chat_template_ = std::move(other.default_chat_template_);
+        fingerprint_ = std::move(other.fingerprint_);
+        configured_chat_template_override_ = std::move(other.configured_chat_template_override_);
+        chat_template_engine_ = std::move(other.chat_template_engine_);
         other.model_ = nullptr;
     }
     return *this;
@@ -93,6 +108,10 @@ Error LlamaModelHandle::load(const ModelConfig &config, std::shared_ptr<LlamaMod
     auto handle = std::make_shared<LlamaModelHandle>();
     handle->model_ = raw;
     handle->refresh_metadata_cache();
+    const auto template_err = handle->initialize_chat_template_engine(config.chat_template_override);
+    if (template_err) {
+        return template_err;
+    }
     out = std::move(handle);
     return Error::make_ok();
 }
@@ -194,53 +213,34 @@ Error LlamaModelHandle::apply_chat_template(const std::vector<std::pair<std::str
                                             bool add_assistant_turn, std::string_view template_override,
                                             bool disable_thinking,
                                             std::string &out_prompt) const {
-    out_prompt.clear();
-    if (messages.empty()) {
-        return Error::make(ErrorCode::InvalidParameter, "Cannot apply a chat template without messages");
-    }
-
-    const char *template_ptr = nullptr;
-    std::string template_storage;
-    if (!template_override.empty()) {
-        template_storage.assign(template_override.data(), template_override.size());
-        template_ptr = template_storage.c_str();
-    } else if (!default_chat_template_.empty()) {
-        template_ptr = default_chat_template_.c_str();
-    }
-
-    if (!template_ptr) {
-        return Error::make(ErrorCode::CapabilityUnavailable, "Model does not expose a chat template");
-    }
-
-    if (disable_thinking) {
-        template_storage = std::string("{% set enable_thinking = false %}\n") + template_ptr;
-        template_ptr = template_storage.c_str();
-    }
-
-    std::vector<llama_chat_message> chat_messages;
-    chat_messages.reserve(messages.size());
-    for (const auto &message : messages) {
-        chat_messages.push_back({message.first.c_str(), message.second.c_str()});
-    }
-
-    std::vector<char> buffer(1024, '\0');
-    int32_t len = llama_chat_apply_template(template_ptr, chat_messages.data(), chat_messages.size(),
-                                            add_assistant_turn, buffer.data(),
-                                            static_cast<int32_t>(buffer.size()));
-    if (len < 0) {
-        return Error::make(ErrorCode::InternalError, "llama_chat_apply_template failed");
-    }
-    if (static_cast<size_t>(len) >= buffer.size()) {
-        buffer.resize(static_cast<size_t>(len) + 1, '\0');
-        len = llama_chat_apply_template(template_ptr, chat_messages.data(), chat_messages.size(), add_assistant_turn,
-                                        buffer.data(), static_cast<int32_t>(buffer.size()));
-        if (len < 0) {
-            return Error::make(ErrorCode::InternalError, "llama_chat_apply_template failed");
+    if (template_override.empty()) {
+        if (!chat_template_engine_.is_initialized()) {
+            return Error::make(ErrorCode::CapabilityUnavailable, "Model does not expose a chat template");
         }
+        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
     }
 
-    out_prompt.assign(buffer.data(), static_cast<size_t>(len));
-    return Error::make_ok();
+    if (chat_template_engine_.is_initialized() && template_override == configured_chat_template_override_) {
+        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
+    }
+
+    ChatTemplateEngine temporary_engine;
+    const auto init_err = temporary_engine.initialize(model_, template_override);
+    if (init_err) {
+        return init_err;
+    }
+    return temporary_engine.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
+}
+
+Error LlamaModelHandle::initialize_chat_template_engine(std::string_view template_override) {
+    configured_chat_template_override_.assign(template_override.data(), template_override.size());
+
+    if (configured_chat_template_override_.empty() && default_chat_template_.empty()) {
+        chat_template_engine_ = ChatTemplateEngine();
+        return Error::make_ok();
+    }
+
+    return chat_template_engine_.initialize(model_, configured_chat_template_override_);
 }
 
 std::vector<int32_t> LlamaModelHandle::tokenize(std::string_view text, bool add_bos, bool special) const {
@@ -326,6 +326,7 @@ void LlamaModelHandle::refresh_metadata_cache() {
     descriptor_.clear();
     default_chat_template_.clear();
     fingerprint_.clear();
+    configured_chat_template_override_.clear();
 
     if (!model_) {
         return;
