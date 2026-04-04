@@ -14,6 +14,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(GODOT_LLAMA_BUILD_GDEXTENSION "Build the Godot-facing GDExtension shared library" ON)
+option(GODOT_LLAMA_ENABLE_MTMD "Build and link llama.cpp libmtmd for multimodal scaffolding" ON)
 
 # Note: exceptions/RTTI are disabled per-target for our own code only.
 # Third-party dependencies (llama.cpp, godot-cpp) need exceptions/RTTI enabled.
@@ -128,6 +129,11 @@ endif()
 
 add_subdirectory(thirdparty/llama.cpp EXCLUDE_FROM_ALL)
 
+if(GODOT_LLAMA_ENABLE_MTMD AND NOT TARGET mtmd)
+    set(LLAMA_INSTALL_VERSION "${PROJECT_VERSION}")
+    add_subdirectory(thirdparty/llama.cpp/tools/mtmd EXCLUDE_FROM_ALL)
+endif()
+
 # godot-cpp (only required for the Godot wrapper target)
 if(GODOT_LLAMA_BUILD_GDEXTENSION)
     if(TARGET godot-cpp)
@@ -148,7 +154,9 @@ endif()
 # src/llama/ — thin adapter over libllama, no Godot headers
 add_library(godot-llama-adapter STATIC
     src/llama/chat_template_engine.cpp
+    src/llama/llama_lora_adapter_handle.cpp
     src/llama/llama_model_handle.cpp
+    src/llama/llama_multimodal_handle.cpp
     src/llama/llama_context_handle.cpp
     src/llama/llama_position_layout.cpp
     src/llama/llama_sampler_handle.cpp
@@ -164,6 +172,10 @@ target_include_directories(godot-llama-adapter
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 target_link_libraries(godot-llama-adapter PUBLIC llama common)
+if(TARGET mtmd)
+    target_link_libraries(godot-llama-adapter PRIVATE mtmd)
+    target_compile_definitions(godot-llama-adapter PRIVATE GODOT_LLAMA_HAS_MTMD=1)
+endif()
 target_compile_options(godot-llama-adapter PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>
 )
@@ -237,7 +249,9 @@ if(GODOT_LLAMA_BUILD_GDEXTENSION)
     add_library(${GDEXTENSION_TARGET} SHARED
         src/godot/register_types.cpp
         src/godot/llama_eval_session.cpp
+        src/godot/llama_lora_adapter_config.cpp
         src/godot/llama_model_config.cpp
+        src/godot/llama_multimodal_config.cpp
         src/godot/llama_session.cpp
         src/godot/rag_utils.cpp
         src/godot/rag_corpus_config.cpp

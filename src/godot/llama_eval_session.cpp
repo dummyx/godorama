@@ -314,6 +314,9 @@ godot_llama::ModelConfig LlamaEvalSession::to_internal_config(const Ref<Resource
     internal.use_mlock = model_config->get_use_mlock();
     internal.embeddings_enabled = model_config->get_embeddings_enabled();
     internal.disable_thinking = model_config->get_disable_thinking();
+    internal.flash_attn_type = model_config->get_flash_attn_type();
+    internal.type_k = model_config->get_type_k();
+    internal.type_v = model_config->get_type_v();
 
     auto template_utf8 = model_config->get_chat_template_override().utf8();
     internal.chat_template_override =

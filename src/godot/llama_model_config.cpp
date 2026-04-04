@@ -1,5 +1,7 @@
 #include "llama_model_config.hpp"
 
+#include "llama_multimodal_config.hpp"
+
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -47,10 +49,34 @@ void LlamaModelConfig::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_disable_thinking"), &LlamaModelConfig::get_disable_thinking);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "disable_thinking"), "set_disable_thinking", "get_disable_thinking");
 
+    ClassDB::bind_method(D_METHOD("set_flash_attn_type", "type"), &LlamaModelConfig::set_flash_attn_type);
+    ClassDB::bind_method(D_METHOD("get_flash_attn_type"), &LlamaModelConfig::get_flash_attn_type);
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "flash_attn_type", PROPERTY_HINT_RANGE, "-1,1"),
+                 "set_flash_attn_type", "get_flash_attn_type");
+
+    ClassDB::bind_method(D_METHOD("set_type_k", "type"), &LlamaModelConfig::set_type_k);
+    ClassDB::bind_method(D_METHOD("get_type_k"), &LlamaModelConfig::get_type_k);
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "type_k"), "set_type_k", "get_type_k");
+
+    ClassDB::bind_method(D_METHOD("set_type_v", "type"), &LlamaModelConfig::set_type_v);
+    ClassDB::bind_method(D_METHOD("get_type_v"), &LlamaModelConfig::get_type_v);
+    ADD_PROPERTY(PropertyInfo(Variant::INT, "type_v"), "set_type_v", "get_type_v");
+
     ClassDB::bind_method(D_METHOD("set_chat_template_override", "tmpl"), &LlamaModelConfig::set_chat_template_override);
     ClassDB::bind_method(D_METHOD("get_chat_template_override"), &LlamaModelConfig::get_chat_template_override);
     ADD_PROPERTY(PropertyInfo(Variant::STRING, "chat_template_override"), "set_chat_template_override",
                  "get_chat_template_override");
+
+    ClassDB::bind_method(D_METHOD("set_lora_adapters", "lora_adapters"), &LlamaModelConfig::set_lora_adapters);
+    ClassDB::bind_method(D_METHOD("get_lora_adapters"), &LlamaModelConfig::get_lora_adapters);
+    ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "lora_adapters"), "set_lora_adapters", "get_lora_adapters");
+
+    ClassDB::bind_method(D_METHOD("set_multimodal_config", "multimodal_config"),
+                         &LlamaModelConfig::set_multimodal_config);
+    ClassDB::bind_method(D_METHOD("get_multimodal_config"), &LlamaModelConfig::get_multimodal_config);
+    ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "multimodal_config", PROPERTY_HINT_RESOURCE_TYPE,
+                              "LlamaMultimodalConfig"),
+                 "set_multimodal_config", "get_multimodal_config");
 }
 
 void LlamaModelConfig::set_model_path(const String &p_path) {
@@ -123,11 +149,48 @@ bool LlamaModelConfig::get_disable_thinking() const {
     return disable_thinking_;
 }
 
+void LlamaModelConfig::set_flash_attn_type(int32_t p_type) {
+    flash_attn_type_ = p_type;
+}
+int32_t LlamaModelConfig::get_flash_attn_type() const {
+    return flash_attn_type_;
+}
+
+void LlamaModelConfig::set_type_k(int32_t p_type) {
+    type_k_ = p_type;
+}
+int32_t LlamaModelConfig::get_type_k() const {
+    return type_k_;
+}
+
+void LlamaModelConfig::set_type_v(int32_t p_type) {
+    type_v_ = p_type;
+}
+int32_t LlamaModelConfig::get_type_v() const {
+    return type_v_;
+}
+
 void LlamaModelConfig::set_chat_template_override(const String &p_template) {
     chat_template_override_ = p_template;
 }
 String LlamaModelConfig::get_chat_template_override() const {
     return chat_template_override_;
+}
+
+void LlamaModelConfig::set_lora_adapters(const Array &p_adapters) {
+    lora_adapters_ = p_adapters;
+}
+
+Array LlamaModelConfig::get_lora_adapters() const {
+    return lora_adapters_;
+}
+
+void LlamaModelConfig::set_multimodal_config(const Ref<LlamaMultimodalConfig> &p_config) {
+    multimodal_config_ = p_config;
+}
+
+Ref<LlamaMultimodalConfig> LlamaModelConfig::get_multimodal_config() const {
+    return multimodal_config_;
 }
 
 } // namespace godot

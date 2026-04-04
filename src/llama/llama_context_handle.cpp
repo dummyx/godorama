@@ -4,6 +4,8 @@
 
 #include <llama.h>
 
+#include <ggml.h>
+
 #include <algorithm>
 #include <thread>
 
@@ -79,6 +81,16 @@ Error LlamaContextHandle::create(const std::shared_ptr<LlamaModelHandle> &model,
 
     params.embeddings = config.embeddings_enabled;
 
+    if (config.flash_attn_type >= 0) {
+        params.flash_attn_type = static_cast<llama_flash_attn_type>(config.flash_attn_type);
+    }
+    if (config.type_k >= 0) {
+        params.type_k = static_cast<ggml_type>(config.type_k);
+    }
+    if (config.type_v >= 0) {
+        params.type_v = static_cast<ggml_type>(config.type_v);
+    }
+
     llama_context *ctx = llama_init_from_model(model->raw(), params);
     if (!ctx) {
         return Error::make(ErrorCode::ContextCreateFailed, "Failed to create llama context");
@@ -88,6 +100,16 @@ Error LlamaContextHandle::create(const std::shared_ptr<LlamaModelHandle> &model,
     out.model_ = model;
     out.abort_flag_ = nullptr;
     out.embeddings_enabled_ = config.embeddings_enabled;
+
+    const auto adapter_err = model->apply_lora_adapters(ctx);
+    if (adapter_err) {
+        llama_free(ctx);
+        out.ctx_ = nullptr;
+        out.model_.reset();
+        out.embeddings_enabled_ = false;
+        return adapter_err;
+    }
+
     return Error::make_ok();
 }
 

@@ -28,6 +28,15 @@ Error InferenceWorker::start(std::shared_ptr<LlamaModelHandle> model, const Mode
         return err;
     }
 
+    if (config_.multimodal.has_value()) {
+        err = LlamaMultimodalHandle::create(model_, config_.multimodal.value(), multimodal_);
+        if (err) {
+            context_ = {};
+            model_.reset();
+            return err;
+        }
+    }
+
     running_.store(true, std::memory_order_release);
     thread_ = std::jthread([this](std::stop_token) { run(); });
 
@@ -56,6 +65,7 @@ void InferenceWorker::stop() noexcept {
         req->cancel();
     }
     queue_.clear();
+    multimodal_ = {};
     context_ = {};
     model_.reset();
 }
@@ -69,6 +79,12 @@ RequestId InferenceWorker::submit(std::string prompt, GenerateOptions options) {
     return submit_with_id(request_id, std::move(prompt), std::move(options));
 }
 
+RequestId InferenceWorker::submit_multimodal(std::string prompt, std::vector<MultimodalInput> media_inputs,
+                                             GenerateOptions options) {
+    const RequestId request_id = next_id_.fetch_add(1, std::memory_order_relaxed);
+    return submit_multimodal_with_id(request_id, std::move(prompt), std::move(media_inputs), std::move(options));
+}
+
 RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options) {
     RequestId observed = next_id_.load(std::memory_order_relaxed);
     while (request_id >= observed &&
@@ -78,6 +94,29 @@ RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prom
     auto req = std::make_shared<GenerateRequest>();
     req->id = request_id;
     req->prompt = std::move(prompt);
+    req->options = std::move(options);
+
+    {
+        std::lock_guard lock(mutex_);
+        queue_.push_back(req);
+    }
+    cv_.notify_one();
+
+    return req->id;
+}
+
+RequestId InferenceWorker::submit_multimodal_with_id(RequestId request_id, std::string prompt,
+                                                     std::vector<MultimodalInput> media_inputs,
+                                                     GenerateOptions options) {
+    RequestId observed = next_id_.load(std::memory_order_relaxed);
+    while (request_id >= observed &&
+           !next_id_.compare_exchange_weak(observed, request_id + 1, std::memory_order_relaxed)) {
+    }
+
+    auto req = std::make_shared<GenerateRequest>();
+    req->id = request_id;
+    req->prompt = std::move(prompt);
+    req->media_inputs = std::move(media_inputs);
     req->options = std::move(options);
 
     {
@@ -156,6 +195,22 @@ Error InferenceWorker::embed(std::string_view text, std::vector<float> &out) {
     return Error::make_ok();
 }
 
+size_t InferenceWorker::lora_adapter_count() const noexcept {
+    return model_ ? model_->lora_adapter_count() : 0;
+}
+
+bool InferenceWorker::supports_image_input() const noexcept {
+    return multimodal_.supports_vision();
+}
+
+bool InferenceWorker::supports_audio_input() const noexcept {
+    return multimodal_.supports_audio();
+}
+
+int32_t InferenceWorker::audio_input_sample_rate_hz() const noexcept {
+    return multimodal_.audio_sample_rate_hz();
+}
+
 void InferenceWorker::run() {
     while (running_.load(std::memory_order_acquire)) {
         std::shared_ptr<GenerateRequest> req;
@@ -202,25 +257,48 @@ void InferenceWorker::run() {
 void InferenceWorker::process_request(GenerateRequest &req) {
     auto t_start = std::chrono::steady_clock::now();
 
-    // Tokenize prompt
-    auto prompt_tokens = model_->tokenize(req.prompt, true, false);
-    if (prompt_tokens.empty()) {
-        if (callbacks_.on_error) {
-            callbacks_.on_error({req.id, ErrorCode::TokenizeFailed, "Prompt tokenization produced no tokens", {}});
-        }
-        return;
-    }
-
     // Clear KV cache for fresh generation
     context_.clear_kv_cache();
 
-    // Decode prompt
-    auto err = context_.decode_tokens(prompt_tokens, 0);
-    if (err) {
-        if (callbacks_.on_error) {
-            callbacks_.on_error({req.id, err.code, err.message, err.context});
+    int32_t n_past = 0;
+    if (!req.media_inputs.empty()) {
+        if (!multimodal_.is_valid()) {
+            if (callbacks_.on_error) {
+                callbacks_.on_error({req.id, ErrorCode::CapabilityUnavailable,
+                                     "This session is not configured for multimodal generation",
+                                     "Set LlamaModelConfig.multimodal_config before calling generate_multimodal_async"});
+            }
+            return;
         }
-        return;
+
+        auto err =
+                multimodal_.evaluate_prompt(context_.raw(), req.prompt, req.media_inputs, true, config_.n_batch, true, n_past);
+        if (err) {
+            if (callbacks_.on_error) {
+                callbacks_.on_error({req.id, err.code, err.message, err.context});
+            }
+            return;
+        }
+    } else {
+        // Tokenize prompt
+        auto prompt_tokens = model_->tokenize(req.prompt, true, false);
+        if (prompt_tokens.empty()) {
+            if (callbacks_.on_error) {
+                callbacks_.on_error({req.id, ErrorCode::TokenizeFailed, "Prompt tokenization produced no tokens", {}});
+            }
+            return;
+        }
+
+        // Decode prompt
+        auto err = context_.decode_tokens(prompt_tokens, 0);
+        if (err) {
+            if (callbacks_.on_error) {
+                callbacks_.on_error({req.id, err.code, err.message, err.context});
+            }
+            return;
+        }
+
+        n_past = static_cast<int32_t>(prompt_tokens.size());
     }
 
     // Set up sampler
@@ -229,7 +307,6 @@ void InferenceWorker::process_request(GenerateRequest &req) {
 
     std::string full_text;
     int32_t tokens_generated = 0;
-    int32_t n_past = static_cast<int32_t>(prompt_tokens.size());
     const auto *v = model_->vocab();
     int32_t eos_token = llama_vocab_eos(v);
     int32_t eot_token = llama_vocab_eot(v);

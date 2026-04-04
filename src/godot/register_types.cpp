@@ -1,7 +1,9 @@
 #include "register_types.hpp"
 
 #include "llama_eval_session.hpp"
+#include "llama_lora_adapter_config.hpp"
 #include "llama_model_config.hpp"
+#include "llama_multimodal_config.hpp"
 #include "llama_session.hpp"
 #include "rag_answer_session.hpp"
 #include "rag_corpus.hpp"
@@ -99,6 +101,8 @@ void initialize_godot_llama_module(ModuleInitializationLevel p_level) {
         llama_backend_initialized = true;
     }
 
+    GDREGISTER_CLASS(LlamaLoraAdapterConfig);
+    GDREGISTER_CLASS(LlamaMultimodalConfig);
     GDREGISTER_CLASS(LlamaModelConfig);
     GDREGISTER_CLASS(LlamaEvalSession);
     GDREGISTER_CLASS(LlamaSession);

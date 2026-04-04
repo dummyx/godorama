@@ -10,6 +10,7 @@
 #include <functional>
 #include <limits>
 #include <thread>
+#include <utility>
 
 namespace godot_llama {
 namespace {
@@ -48,6 +49,7 @@ std::string llama_string_from_callback(const std::function<int32_t(char *, size_
 
 LlamaModelHandle::~LlamaModelHandle() {
     chat_template_engine_ = ChatTemplateEngine();
+    lora_adapters_.clear();
     if (model_) {
         llama_model_free(model_);
         model_ = nullptr;
@@ -61,13 +63,15 @@ LlamaModelHandle::LlamaModelHandle(LlamaModelHandle &&other) noexcept
       default_chat_template_(std::move(other.default_chat_template_)),
       fingerprint_(std::move(other.fingerprint_)),
       configured_chat_template_override_(std::move(other.configured_chat_template_override_)),
-      chat_template_engine_(std::move(other.chat_template_engine_)) {
+      chat_template_engine_(std::move(other.chat_template_engine_)),
+      lora_adapters_(std::move(other.lora_adapters_)) {
     other.model_ = nullptr;
 }
 
 LlamaModelHandle &LlamaModelHandle::operator=(LlamaModelHandle &&other) noexcept {
     if (this != &other) {
         chat_template_engine_ = ChatTemplateEngine();
+        lora_adapters_.clear();
         if (model_) {
             llama_model_free(model_);
         }
@@ -78,6 +82,7 @@ LlamaModelHandle &LlamaModelHandle::operator=(LlamaModelHandle &&other) noexcept
         fingerprint_ = std::move(other.fingerprint_);
         configured_chat_template_override_ = std::move(other.configured_chat_template_override_);
         chat_template_engine_ = std::move(other.chat_template_engine_);
+        lora_adapters_ = std::move(other.lora_adapters_);
         other.model_ = nullptr;
     }
     return *this;
@@ -108,6 +113,10 @@ Error LlamaModelHandle::load(const ModelConfig &config, std::shared_ptr<LlamaMod
     auto handle = std::make_shared<LlamaModelHandle>();
     handle->model_ = raw;
     handle->refresh_metadata_cache();
+    const auto lora_err = handle->load_lora_adapters(config.lora_adapters);
+    if (lora_err) {
+        return lora_err;
+    }
     const auto template_err = handle->initialize_chat_template_engine(config.chat_template_override);
     if (template_err) {
         return template_err;
@@ -180,6 +189,10 @@ uint64_t LlamaModelHandle::parameter_count() const noexcept {
     return model_ ? llama_model_n_params(model_) : 0;
 }
 
+size_t LlamaModelHandle::lora_adapter_count() const noexcept {
+    return lora_adapters_.size();
+}
+
 std::optional<std::string> LlamaModelHandle::metadata_value(std::string_view key) const {
     if (!model_ || key.empty()) {
         return std::nullopt;
@@ -241,6 +254,35 @@ Error LlamaModelHandle::apply_chat_template(const std::vector<std::pair<std::str
     return temporary_engine.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
 }
 
+Error LlamaModelHandle::apply_lora_adapters(llama_context *ctx) const {
+    if (ctx == nullptr) {
+        return Error::make(ErrorCode::InvalidParameter, "Context is null");
+    }
+
+    if (lora_adapters_.empty()) {
+        return Error::make_ok();
+    }
+
+    std::vector<llama_adapter_lora *> adapters;
+    std::vector<float> scales;
+    adapters.reserve(lora_adapters_.size());
+    scales.reserve(lora_adapters_.size());
+
+    for (const auto &adapter : lora_adapters_) {
+        adapters.push_back(adapter.raw());
+        scales.push_back(adapter.scale());
+    }
+
+    const int32_t status = llama_set_adapters_lora(ctx, adapters.data(), adapters.size(), scales.data());
+    if (status != 0) {
+        return Error::make(ErrorCode::CapabilityUnavailable,
+                           "Failed to apply LoRA adapters to the llama context",
+                           "llama_set_adapters_lora returned " + std::to_string(status));
+    }
+
+    return Error::make_ok();
+}
+
 Error LlamaModelHandle::initialize_chat_template_engine(std::string_view template_override) {
     configured_chat_template_override_.assign(template_override.data(), template_override.size());
 
@@ -250,6 +292,23 @@ Error LlamaModelHandle::initialize_chat_template_engine(std::string_view templat
     }
 
     return chat_template_engine_.initialize(model_, configured_chat_template_override_);
+}
+
+Error LlamaModelHandle::load_lora_adapters(const std::vector<LoraAdapterConfig> &configs) {
+    lora_adapters_.clear();
+    lora_adapters_.reserve(configs.size());
+
+    for (const auto &config : configs) {
+        LlamaLoraAdapterHandle adapter;
+        const auto err = LlamaLoraAdapterHandle::load(model_, config, adapter);
+        if (err) {
+            lora_adapters_.clear();
+            return err;
+        }
+        lora_adapters_.push_back(std::move(adapter));
+    }
+
+    return Error::make_ok();
 }
 
 std::vector<int32_t> LlamaModelHandle::tokenize(std::string_view text, bool add_bos, bool special) const {

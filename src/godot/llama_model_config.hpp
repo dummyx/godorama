@@ -1,7 +1,10 @@
 #pragma once
 
+#include "llama_multimodal_config.hpp"
+
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 
 namespace godot {
 
@@ -42,8 +45,23 @@ public:
     void set_disable_thinking(bool p_disable_thinking);
     bool get_disable_thinking() const;
 
+    void set_flash_attn_type(int32_t p_type);
+    int32_t get_flash_attn_type() const;
+
+    void set_type_k(int32_t p_type);
+    int32_t get_type_k() const;
+
+    void set_type_v(int32_t p_type);
+    int32_t get_type_v() const;
+
     void set_chat_template_override(const String &p_template);
     String get_chat_template_override() const;
+
+    void set_lora_adapters(const Array &p_adapters);
+    Array get_lora_adapters() const;
+
+    void set_multimodal_config(const Ref<LlamaMultimodalConfig> &p_config);
+    Ref<LlamaMultimodalConfig> get_multimodal_config() const;
 
 protected:
     static void _bind_methods();
@@ -59,7 +77,12 @@ private:
     bool use_mlock_ = false;
     bool embeddings_enabled_ = false;
     bool disable_thinking_ = false;
+    int32_t flash_attn_type_ = -1;
+    int32_t type_k_ = -1;
+    int32_t type_v_ = -1;
     String chat_template_override_;
+    Array lora_adapters_;
+    Ref<LlamaMultimodalConfig> multimodal_config_;
 };
 
 } // namespace godot

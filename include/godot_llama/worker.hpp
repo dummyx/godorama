@@ -2,6 +2,7 @@
 
 #include "godot_llama/llama_context_handle.hpp"
 #include "godot_llama/llama_model_handle.hpp"
+#include "godot_llama/llama_multimodal_handle.hpp"
 #include "godot_llama/llama_params.hpp"
 #include "godot_llama/request.hpp"
 
@@ -9,6 +10,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <thread>
 
 namespace godot_llama {
@@ -31,7 +33,12 @@ public:
     [[nodiscard]] bool is_running() const noexcept;
 
     [[nodiscard]] RequestId submit(std::string prompt, GenerateOptions options);
+    [[nodiscard]] RequestId submit_multimodal(std::string prompt, std::vector<MultimodalInput> media_inputs,
+                                              GenerateOptions options);
     [[nodiscard]] RequestId submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options);
+    [[nodiscard]] RequestId submit_multimodal_with_id(RequestId request_id, std::string prompt,
+                                                      std::vector<MultimodalInput> media_inputs,
+                                                      GenerateOptions options);
     void cancel(RequestId id) noexcept;
     [[nodiscard]] Error apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
                                             bool add_assistant_turn, std::string &out_prompt) const;
@@ -42,6 +49,10 @@ public:
 
     // Embedding (synchronous, blocking — use from worker or test code only)
     [[nodiscard]] Error embed(std::string_view text, std::vector<float> &out);
+    [[nodiscard]] size_t lora_adapter_count() const noexcept;
+    [[nodiscard]] bool supports_image_input() const noexcept;
+    [[nodiscard]] bool supports_audio_input() const noexcept;
+    [[nodiscard]] int32_t audio_input_sample_rate_hz() const noexcept;
 
 private:
     void run();
@@ -49,6 +60,7 @@ private:
 
     std::shared_ptr<LlamaModelHandle> model_;
     LlamaContextHandle context_;
+    LlamaMultimodalHandle multimodal_;
     RequestCallbacks callbacks_;
     ModelConfig config_;
 

@@ -1,7 +1,9 @@
 #include "llama_session.hpp"
 
 #include "godot_llama/llama_model_handle.hpp"
+#include "llama_lora_adapter_config.hpp"
 #include "llama_model_config.hpp"
+#include "llama_multimodal_config.hpp"
 
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -22,11 +24,20 @@ void LlamaSession::_bind_methods() {
                          DEFVAL(Dictionary()));
     ClassDB::bind_method(D_METHOD("generate_messages_async", "messages", "options", "add_assistant_turn"),
                          &LlamaSession::generate_messages_async, DEFVAL(Dictionary()), DEFVAL(true));
+    ClassDB::bind_method(D_METHOD("generate_multimodal_async", "prompt", "media_inputs", "options"),
+                         &LlamaSession::generate_multimodal_async, DEFVAL(Dictionary()));
+    ClassDB::bind_method(D_METHOD("generate_multimodal_messages_async", "messages", "media_inputs", "options",
+                                  "add_assistant_turn"),
+                         &LlamaSession::generate_multimodal_messages_async, DEFVAL(Dictionary()), DEFVAL(true));
     ClassDB::bind_method(D_METHOD("cancel", "request_id"), &LlamaSession::cancel);
     ClassDB::bind_method(D_METHOD("tokenize", "text", "add_bos", "special"), &LlamaSession::tokenize, DEFVAL(false),
                          DEFVAL(false));
     ClassDB::bind_method(D_METHOD("detokenize", "tokens"), &LlamaSession::detokenize);
     ClassDB::bind_method(D_METHOD("embed", "text"), &LlamaSession::embed);
+    ClassDB::bind_method(D_METHOD("get_lora_adapter_count"), &LlamaSession::get_lora_adapter_count);
+    ClassDB::bind_method(D_METHOD("supports_image_input"), &LlamaSession::supports_image_input);
+    ClassDB::bind_method(D_METHOD("supports_audio_input"), &LlamaSession::supports_audio_input);
+    ClassDB::bind_method(D_METHOD("get_audio_input_sample_rate_hz"), &LlamaSession::get_audio_input_sample_rate_hz);
     ClassDB::bind_method(D_METHOD("poll"), &LlamaSession::poll);
 
     ADD_SIGNAL(MethodInfo("opened"));
@@ -193,6 +204,57 @@ int LlamaSession::generate_messages_async(const Array &messages, const Dictionar
     return worker_->submit(std::move(prompt), std::move(opts));
 }
 
+int LlamaSession::generate_multimodal_async(const String &prompt, const Array &media_inputs,
+                                            const Dictionary &options) {
+    if (!is_open_) {
+        UtilityFunctions::push_error("LlamaSession: not open");
+        return -1;
+    }
+
+    const auto internal_media = to_internal_media_inputs(media_inputs);
+    if (internal_media.empty()) {
+        UtilityFunctions::push_error("LlamaSession: media_inputs must contain at least one valid {path, type} entry");
+        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    }
+
+    auto utf8 = prompt.utf8();
+    std::string prompt_str(utf8.get_data(), static_cast<size_t>(utf8.length()));
+    auto opts = to_internal_options(options);
+
+    return worker_->submit_multimodal(std::move(prompt_str), std::move(internal_media), std::move(opts));
+}
+
+int LlamaSession::generate_multimodal_messages_async(const Array &messages, const Array &media_inputs,
+                                                     const Dictionary &options, bool add_assistant_turn) {
+    if (!is_open_) {
+        UtilityFunctions::push_error("LlamaSession: not open");
+        return -1;
+    }
+
+    const auto internal_messages = to_internal_messages(messages);
+    if (internal_messages.empty()) {
+        UtilityFunctions::push_error("LlamaSession: messages must contain at least one valid {role, content} entry");
+        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    }
+
+    const auto internal_media = to_internal_media_inputs(media_inputs);
+    if (internal_media.empty()) {
+        UtilityFunctions::push_error("LlamaSession: media_inputs must contain at least one valid {path, type} entry");
+        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    }
+
+    std::string prompt;
+    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt);
+    if (template_err) {
+        UtilityFunctions::push_error(
+                String("LlamaSession generate_multimodal_messages_async: ") + template_err.message.c_str());
+        return -static_cast<int>(template_err.code);
+    }
+
+    auto opts = to_internal_options(options);
+    return worker_->submit_multimodal(std::move(prompt), std::move(internal_media), std::move(opts));
+}
+
 void LlamaSession::cancel(int request_id) {
     if (is_open_) {
         worker_->cancel(static_cast<godot_llama::RequestId>(request_id));
@@ -249,6 +311,26 @@ PackedFloat32Array LlamaSession::embed(const String &text) {
         memcpy(result.ptrw(), embd.data(), embd.size() * sizeof(float));
     }
     return result;
+}
+
+int LlamaSession::get_lora_adapter_count() const {
+    std::lock_guard lock(state_mutex_);
+    return worker_ ? static_cast<int>(worker_->lora_adapter_count()) : 0;
+}
+
+bool LlamaSession::supports_image_input() const {
+    std::lock_guard lock(state_mutex_);
+    return worker_ ? worker_->supports_image_input() : false;
+}
+
+bool LlamaSession::supports_audio_input() const {
+    std::lock_guard lock(state_mutex_);
+    return worker_ ? worker_->supports_audio_input() : false;
+}
+
+int LlamaSession::get_audio_input_sample_rate_hz() const {
+    std::lock_guard lock(state_mutex_);
+    return worker_ ? worker_->audio_input_sample_rate_hz() : -1;
 }
 
 void LlamaSession::poll() {
@@ -327,9 +409,49 @@ godot_llama::ModelConfig LlamaSession::to_internal_config(const Ref<Resource> &c
     c.use_mlock = mc->get_use_mlock();
     c.embeddings_enabled = mc->get_embeddings_enabled();
     c.disable_thinking = mc->get_disable_thinking();
+    c.flash_attn_type = mc->get_flash_attn_type();
+    c.type_k = mc->get_type_k();
+    c.type_v = mc->get_type_v();
 
     auto tmpl_utf8 = mc->get_chat_template_override().utf8();
     c.chat_template_override = std::string(tmpl_utf8.get_data(), static_cast<size_t>(tmpl_utf8.length()));
+
+    const Array lora_adapters = mc->get_lora_adapters();
+    for (int64_t index = 0; index < lora_adapters.size(); ++index) {
+        const Variant &entry = lora_adapters[index];
+        if (entry.get_type() != Variant::OBJECT) {
+            continue;
+        }
+
+        Object *entry_object = entry;
+        const auto *adapter = Object::cast_to<LlamaLoraAdapterConfig>(entry_object);
+        if (adapter == nullptr) {
+            continue;
+        }
+
+        auto path_utf8 = adapter->get_adapter_path().utf8();
+        godot_llama::LoraAdapterConfig adapter_config;
+        adapter_config.path = std::string(path_utf8.get_data(), static_cast<size_t>(path_utf8.length()));
+        adapter_config.scale = static_cast<float>(adapter->get_scale());
+        c.lora_adapters.push_back(std::move(adapter_config));
+    }
+
+    const Ref<LlamaMultimodalConfig> multimodal = mc->get_multimodal_config();
+    if (!multimodal.is_null()) {
+        godot_llama::MultimodalConfig multimodal_config;
+        auto mmproj_utf8 = multimodal->get_mmproj_path().utf8();
+        multimodal_config.mmproj_path =
+                std::string(mmproj_utf8.get_data(), static_cast<size_t>(mmproj_utf8.length()));
+        auto marker_utf8 = multimodal->get_media_marker().utf8();
+        multimodal_config.media_marker =
+                std::string(marker_utf8.get_data(), static_cast<size_t>(marker_utf8.length()));
+        multimodal_config.use_gpu = multimodal->get_use_gpu();
+        multimodal_config.print_timings = multimodal->get_print_timings();
+        multimodal_config.n_threads = multimodal->get_n_threads();
+        multimodal_config.image_min_tokens = multimodal->get_image_min_tokens();
+        multimodal_config.image_max_tokens = multimodal->get_image_max_tokens();
+        c.multimodal = std::move(multimodal_config);
+    }
 
     return c;
 }
@@ -393,6 +515,62 @@ std::vector<std::pair<std::string, std::string>> LlamaSession::to_internal_messa
     }
 
     return internal_messages;
+}
+
+std::vector<godot_llama::MultimodalInput> LlamaSession::to_internal_media_inputs(const Array &media_inputs) const {
+    std::vector<godot_llama::MultimodalInput> result;
+    result.reserve(static_cast<size_t>(media_inputs.size()));
+
+    for (int64_t i = 0; i < media_inputs.size(); ++i) {
+        const Variant &entry = media_inputs[i];
+        if (entry.get_type() != Variant::DICTIONARY) {
+            continue;
+        }
+
+        const Dictionary media = entry;
+        if (!media.has("path") && !media.has("data")) {
+            continue;
+        }
+
+        godot_llama::MultimodalInput input;
+        if (media.has("type")) {
+            const String type = String(media["type"]).strip_edges().to_lower();
+            if (type == "audio" || type == "voice" || type == "speech") {
+                input.type = godot_llama::MultimodalInputType::Audio;
+            }
+        }
+
+        if (media.has("path")) {
+            const String path = String(media["path"]).strip_edges();
+            if (!path.is_empty()) {
+                auto path_utf8 = path.utf8();
+                input.path = std::string(path_utf8.get_data(), static_cast<size_t>(path_utf8.length()));
+            }
+        }
+
+        if (media.has("data")) {
+            const PackedByteArray bytes = media["data"];
+            if (bytes.size() > 0) {
+                input.data.resize(static_cast<size_t>(bytes.size()));
+                memcpy(input.data.data(), bytes.ptr(), static_cast<size_t>(bytes.size()));
+            }
+        }
+
+        if (media.has("id")) {
+            const String id = String(media["id"]).strip_edges();
+            if (!id.is_empty()) {
+                auto id_utf8 = id.utf8();
+                input.id = std::string(id_utf8.get_data(), static_cast<size_t>(id_utf8.length()));
+            }
+        }
+
+        // Accept entries that have either a path or in-memory data
+        if (!input.path.empty() || !input.data.empty()) {
+            result.push_back(std::move(input));
+        }
+    }
+
+    return result;
 }
 
 } // namespace godot

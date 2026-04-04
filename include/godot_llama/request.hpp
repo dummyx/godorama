@@ -37,6 +37,7 @@ struct ErrorEvent {
 struct GenerateRequest {
     RequestId id = 0;
     std::string prompt;
+    std::vector<MultimodalInput> media_inputs;
     GenerateOptions options;
     std::atomic<bool> cancelled{false};
 
