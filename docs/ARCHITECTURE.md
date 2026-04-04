@@ -10,6 +10,8 @@
                │ Variant-compatible API
 ┌──────────────▼──────────────────────┐
 │        src/godot/                   │
+│  LlamaLoraAdapterConfig (Resource)  │
+│  LlamaMultimodalConfig (Resource)   │
 │  LlamaModelConfig (Resource)        │
 │  LlamaSession (RefCounted)          │
 │  LlamaEvalSession (RefCounted)      │
@@ -36,6 +38,8 @@
 │        src/llama/                   │
 │  LlamaModelHandle (shared_ptr)      │
 │  LlamaContextHandle (move-only)     │
+│  LlamaLoraAdapterHandle (move-only) │
+│  LlamaMultimodalHandle (move-only)  │
 │  LlamaSamplerHandle (move-only)     │
 │  ChatTemplateEngine                 │
 │  position layout helpers            │
@@ -43,6 +47,7 @@
                │
 ┌──────────────▼──────────────────────┐
 │  thirdparty/llama.cpp (libllama)    │
+│  thirdparty/llama.cpp/tools/mtmd    │
 │  thirdparty/godot-cpp               │
 └─────────────────────────────────────┘
 ```
@@ -52,6 +57,8 @@
 ### src/llama/ (adapter layer)
 
 - Wraps raw `llama_model`, `llama_context`, `llama_sampler`
+- Owns LoRA adapter lifetime against the loaded `llama_model`
+- Optionally owns `libmtmd` projector state for multimodal capability probing
 - Translates `ModelConfig`/`GenerateOptions` to llama.cpp params
 - Owns the reusable chat-template engine over `llama.cpp/common/chat.*`
 - Normalizes multi-component position layouts for eval-style embedding prefill
@@ -77,6 +84,8 @@
 ### src/godot/ (binding layer)
 
 - `LlamaModelConfig`: Godot `Resource` exposing model configuration as editor properties
+- `LlamaLoraAdapterConfig`: Godot `Resource` for adapter path + scale
+- `LlamaMultimodalConfig`: Godot `Resource` for `mmproj` configuration
 - `LlamaSession`: Godot `RefCounted` with async generation, tokenization, embeddings
 - `LlamaEvalSession`: Godot `RefCounted` with async `inputs_embeds` prefill/eval
 - `RagCorpusConfig`: editor-facing corpus and embedding configuration
@@ -91,7 +100,10 @@
 Main Thread                    Background Threads
 ───────────                    ──────────────────
 session.open(config)
-  ├── start async open thread ─→ load model/context
+  ├── start async open thread ─→ load model
+  │                             load LoRA adapters
+  │                             create text context
+  │                             optionally create mtmd projector
   └── return immediately
 
 session.poll()
@@ -152,6 +164,8 @@ This keeps downstream Godot runs readable while still surfacing real warnings an
 
 - `LlamaModelHandle`: shared via `shared_ptr` (model can outlive individual contexts)
 - `LlamaContextHandle`: move-only, holds a `shared_ptr` to its model
+- `LlamaLoraAdapterHandle`: move-only, owned by `LlamaModelHandle`, freed before the model handle
+- `LlamaMultimodalHandle`: move-only, owned by `InferenceWorker`, freed before the model handle
 - `LlamaSamplerHandle`: move-only, created per-request, destroyed after request
 - `InferenceWorker`: owns the context; owned by `LlamaSession`
 - `LlamaEvalSession`: owns its own context, worker thread, and eval request queue
@@ -159,3 +173,9 @@ This keeps downstream Godot runs readable while still surfacing real warnings an
 - `rag::CorpusEngine`: owns store/chunker/embedder/retriever/reranker behind a shared core handle
 - `RagCorpus`: owns a serial background job queue for ingest/retrieve operations
 - `RagAnswerSession`: owns a separate answer queue plus an `InferenceWorker` for streaming generation
+
+## Multimodal Status
+
+- LoRA support uses the stable `llama.h` adapter API and is wired as a usable scaffold today.
+- Image/audio support is intentionally split behind `LlamaMultimodalHandle` and `LlamaMultimodalConfig`.
+- The pinned upstream `libmtmd` API is marked experimental, so `godorama` currently limits the Godot-facing surface to configuration plus capability introspection rather than a bound media request API.

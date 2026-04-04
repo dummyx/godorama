@@ -1,5 +1,32 @@
 # API Reference
 
+## LlamaLoraAdapterConfig (Resource)
+
+Editor-facing LoRA adapter configuration.
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `adapter_path` | `String` | `""` | Path to a LoRA GGUF adapter |
+| `scale` | `float` | `1.0` | Adapter scale passed to `llama_set_adapters_lora()` |
+
+## LlamaMultimodalConfig (Resource)
+
+Editor-facing multimodal projector configuration. Assigned to `LlamaModelConfig.multimodal_config` to enable image and audio input through `libmtmd`.
+
+### Properties
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `mmproj_path` | `String` | `""` | Path to the multimodal projector GGUF |
+| `media_marker` | `String` | `"<__media__>"` | Marker string used in prompts to indicate where media should be inserted. Must match what the model expects. |
+| `use_gpu` | `bool` | `false` | Whether `libmtmd` may offload projector work to GPU when a backend is enabled |
+| `print_timings` | `bool` | `false` | Enable `libmtmd` timing logs |
+| `n_threads` | `int` | `-1` | `libmtmd` worker threads (`-1` = default behavior) |
+| `image_min_tokens` | `int` | `0` | Lower bound for dynamic-resolution image tokenization (`0` = metadata/default) |
+| `image_max_tokens` | `int` | `0` | Upper bound for dynamic-resolution image tokenization (`0` = metadata/default) |
+
 ## LlamaModelConfig (Resource)
 
 Configuration resource for model loading. Can be created in the editor or from code.
@@ -19,6 +46,8 @@ Configuration resource for model loading. Can be created in the editor or from c
 | `embeddings_enabled` | `bool` | `false` | Enable embedding extraction |
 | `disable_thinking` | `bool` | `false` | When using message templating, request the model's non-thinking path if the template supports it |
 | `chat_template_override` | `String` | `""` | Override the model chat template used by `generate_messages_async()` |
+| `lora_adapters` | `Array[LlamaLoraAdapterConfig]` | `[]` | Ordered LoRA adapter list applied when the session context is created |
+| `multimodal_config` | `LlamaMultimodalConfig` | `null` | Optional `libmtmd` projector configuration loaded during `open()` |
 
 ## LlamaSession (RefCounted)
 
@@ -60,6 +89,26 @@ Submits a message-templated generation request. Each message must be a dictionar
   - Uses the full `llama.cpp` common-chat Jinja path.
   - Honors `chat_template_override` and `disable_thinking` from `LlamaModelConfig`.
 
+#### `generate_multimodal_async(prompt: String, media_inputs: Array, options: Dictionary = {}) -> int`
+Submits a multimodal generation request with image and/or audio inputs. Requires `multimodal_config` to be set in the session's `LlamaModelConfig`.
+- **Blocks**: No
+- **Thread-safe**: No (call from main thread)
+- **Returns**: `request_id` for tracking, or negative error code on validation failure
+- **Notes**:
+  - The prompt must contain one `<__media__>` marker (or the configured `media_marker`) for each media input.
+  - `media_inputs` is an `Array` of dictionaries, each with the keys documented under [Media Input Dictionary](#media-input-dictionary).
+  - Emits `token_emitted`, `completed`, `failed`, or `cancelled` through `poll()` like other generation methods.
+
+#### `generate_multimodal_messages_async(messages: Array, media_inputs: Array, options: Dictionary = {}, add_assistant_turn: bool = true) -> int`
+Submits a message-templated multimodal generation request. Combines `generate_messages_async` chat template processing with multimodal media input.
+- **Blocks**: No
+- **Thread-safe**: No (call from main thread)
+- **Returns**: `request_id` for tracking, or negative error code on validation failure
+- **Notes**:
+  - The resulting prompt from chat template expansion must contain one media marker per media input.
+  - `messages` follows the same `{role, content}` format as `generate_messages_async`.
+  - `media_inputs` follows the same format as `generate_multimodal_async`.
+
 #### `cancel(request_id: int)`
 Cancels a pending or in-progress generation request.
 - **Blocks**: No
@@ -80,6 +129,26 @@ Computes embeddings for text. Requires `embeddings_enabled = true` in config.
 - **Blocks**: Yes
 - **Thread-safe**: No
 
+#### `get_lora_adapter_count() -> int`
+Returns the number of LoRA adapters loaded into the currently open session.
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `supports_image_input() -> bool`
+Returns whether the currently loaded multimodal projector reports image support.
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `supports_audio_input() -> bool`
+Returns whether the currently loaded multimodal projector reports audio support.
+- **Blocks**: No
+- **Thread-safe**: Yes
+
+#### `get_audio_input_sample_rate_hz() -> int`
+Returns the multimodal audio sample rate in Hz, or `-1` when audio input is unavailable.
+- **Blocks**: No
+- **Thread-safe**: Yes
+
 #### `poll()`
 Flushes queued events from the worker thread and emits signals.
 Must be called each frame (e.g., from `_process`).
@@ -90,6 +159,22 @@ Must be called each frame (e.g., from `_process`).
 
 - `open()` is asynchronous. `opened()` or `failed()` arrives later through `poll()`.
 - `disable_thinking` only applies to the message-templated path. It does not rewrite raw prompt text passed to `generate_async()`.
+- `lora_adapters` uses the stable `llama.cpp` adapter API and is applied to the session context at open time.
+- `multimodal_config` loads `libmtmd` and enables multimodal generation through `generate_multimodal_async` and `generate_multimodal_messages_async`.
+
+### Media Input Dictionary
+
+Each element of the `media_inputs` array passed to `generate_multimodal_async` or `generate_multimodal_messages_async` is a `Dictionary` with the following keys:
+
+| Key | Type | Required | Default | Description |
+|-----|------|----------|---------|-------------|
+| `path` | `String` | Yes (or `data`) | `""` | File path to an image or audio file |
+| `data` | `PackedByteArray` | Yes (or `path`) | empty | In-memory image/audio bytes. When non-empty, takes precedence over `path` |
+| `type` | `String` | No | `"image"` | Media type: `"image"` or `"audio"` (also accepts `"voice"`, `"speech"`) |
+| `id` | `String` | No | `""` | Optional identifier for KV cache tracking |
+
+Supported image formats: JPG, PNG, BMP, GIF, and others supported by `stb_image`.
+Supported audio formats: WAV, MP3, FLAC, and others supported by `miniaudio`.
 
 ### Generation Options Dictionary
 

@@ -29,6 +29,12 @@ cmake --build --preset build-dev
 ctest --preset test-dev --output-on-failure
 ```
 
+To disable the multimodal scaffold entirely:
+
+```sh
+cmake --preset dev -DGODOT_LLAMA_ENABLE_MTMD=OFF
+```
+
 If a sandboxed launcher interferes with `ctest`, run the binaries directly:
 
 ```sh
@@ -88,6 +94,7 @@ cmake --build --preset build-dev --target lint           # clang-tidy
 - `LlamaSession.open()` and `LlamaEvalSession.open()` are asynchronous.
 - Runtime log verbosity can be overridden with `GODORAMA_LLAMA_LOG_LEVEL=debug|info|warn|error|silent`.
 - Message-based chat generation uses the `llama.cpp` common-chat Jinja engine, not the limited `llama_chat_apply_template()` helper.
+- `GODOT_LLAMA_ENABLE_MTMD=ON` keeps the `libmtmd` multimodal scaffold available; the current Godot surface exposes projector loading and capability introspection, not media generation requests yet.
 
 ## GPU backends
 

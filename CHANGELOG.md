@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased] - 2026-04-03
+
+### Added
+- `LlamaLoraAdapterConfig` resource and `LlamaModelConfig.lora_adapters`
+- `LlamaMultimodalConfig` resource and `LlamaModelConfig.multimodal_config`
+- LoRA adapter loading through the stable `llama.cpp` adapter API during session open
+- optional `libmtmd` build wiring behind `GODOT_LLAMA_ENABLE_MTMD`
+- `LlamaSession` capability introspection for loaded LoRA adapter count plus image/audio multimodal support
+- `LlamaSession.generate_multimodal_async()` for multimodal generation with image/audio inputs
+- `LlamaSession.generate_multimodal_messages_async()` for message-templated multimodal generation
+- in-memory `PackedByteArray` media input support via `data` key in media input dictionaries
+- `MultimodalInput.data` field for passing image/audio bytes without a file path
+
+### Changed
+- Multimodal generation methods are now fully bound and documented
+- `LlamaMultimodalHandle::evaluate_prompt` accepts both file-path and in-memory buffer media
+- Media input dictionaries now accept either `path` or `data` (or both, with `data` taking precedence)
+- Updated `API.md` with full multimodal method documentation and media input dictionary format
+
 ## [0.2.0] - 2026-04-02
 
 ### Added
