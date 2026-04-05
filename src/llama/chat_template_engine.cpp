@@ -55,8 +55,10 @@ const std::string &ChatTemplateEngine::template_override() const noexcept {
 }
 
 Error ChatTemplateEngine::apply(const std::vector<std::pair<std::string, std::string>> &messages,
-                                bool add_assistant_turn, bool disable_thinking, std::string &out_prompt) const {
+                                bool add_assistant_turn, bool disable_thinking, std::string &out_prompt,
+                                std::vector<std::string> &out_stops) const {
     out_prompt.clear();
+    out_stops.clear();
 
     if (!templates_) {
         return Error::make(ErrorCode::CapabilityUnavailable, "Chat template engine is not initialized");
@@ -79,9 +81,29 @@ Error ChatTemplateEngine::apply(const std::vector<std::pair<std::string, std::st
     }
 
     try {
-        out_prompt = common_chat_templates_apply(templates_, inputs).prompt;
+        auto result = common_chat_templates_apply(templates_, inputs);
+        out_prompt = std::move(result.prompt);
+        out_stops = std::move(result.additional_stops);
+
+        // When additional_stops is empty (common for Jinja-based templates),
+        // derive the turn-end stop from the generation_prompt. Templates using
+        // paired tags like <|turn> / <turn|> embed the open tag in the
+        // generation_prompt; the corresponding close tag ends the model's turn.
+        if (out_stops.empty() && !result.generation_prompt.empty()) {
+            static constexpr std::string_view open_prefix = "<|";
+            const auto &gp = result.generation_prompt;
+            auto start = gp.find(open_prefix);
+            if (start != std::string::npos) {
+                auto end = gp.find('>', start + open_prefix.size());
+                if (end != std::string::npos) {
+                    auto tag = gp.substr(start + open_prefix.size(), end - start - open_prefix.size());
+                    out_stops.push_back("<" + tag + "|>");
+                }
+            }
+        }
     } catch (const std::exception &e) {
         out_prompt.clear();
+        out_stops.clear();
         return Error::make(ErrorCode::InternalError, "Failed to apply chat template", e.what());
     }
 

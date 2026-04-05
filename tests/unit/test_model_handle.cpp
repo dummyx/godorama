@@ -92,7 +92,8 @@ TEST_CASE("LlamaModelHandle apply_lora_adapters returns ok for empty adapters", 
 TEST_CASE("LlamaModelHandle apply_chat_template fails when unloaded", "[model_handle]") {
     LlamaModelHandle handle;
     std::string out;
-    auto err = handle.apply_chat_template({{"user", "hello"}}, true, "", false, out);
+    std::vector<std::string> stops;
+    auto err = handle.apply_chat_template({{"user", "hello"}}, true, "", false, out, stops);
     REQUIRE(err);
 }
 

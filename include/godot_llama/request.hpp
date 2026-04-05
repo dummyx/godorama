@@ -39,6 +39,7 @@ struct GenerateRequest {
     std::string prompt;
     std::vector<MultimodalInput> media_inputs;
     GenerateOptions options;
+    bool prompt_has_special_tokens = false;
     std::atomic<bool> cancelled{false};
 
     void cancel() noexcept { cancelled.store(true, std::memory_order_release); }

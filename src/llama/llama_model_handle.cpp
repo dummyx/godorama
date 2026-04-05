@@ -234,16 +234,17 @@ std::vector<std::pair<std::string, std::string>> LlamaModelHandle::metadata_entr
 Error LlamaModelHandle::apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
                                             bool add_assistant_turn, std::string_view template_override,
                                             bool disable_thinking,
-                                            std::string &out_prompt) const {
+                                            std::string &out_prompt,
+                                            std::vector<std::string> &out_stops) const {
     if (template_override.empty()) {
         if (!chat_template_engine_.is_initialized()) {
             return Error::make(ErrorCode::CapabilityUnavailable, "Model does not expose a chat template");
         }
-        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
+        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt, out_stops);
     }
 
     if (chat_template_engine_.is_initialized() && template_override == configured_chat_template_override_) {
-        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
+        return chat_template_engine_.apply(messages, add_assistant_turn, disable_thinking, out_prompt, out_stops);
     }
 
     ChatTemplateEngine temporary_engine;
@@ -251,7 +252,7 @@ Error LlamaModelHandle::apply_chat_template(const std::vector<std::pair<std::str
     if (init_err) {
         return init_err;
     }
-    return temporary_engine.apply(messages, add_assistant_turn, disable_thinking, out_prompt);
+    return temporary_engine.apply(messages, add_assistant_turn, disable_thinking, out_prompt, out_stops);
 }
 
 Error LlamaModelHandle::apply_lora_adapters(llama_context *ctx) const {

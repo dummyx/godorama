@@ -74,18 +74,22 @@ bool InferenceWorker::is_running() const noexcept {
     return running_.load(std::memory_order_acquire);
 }
 
-RequestId InferenceWorker::submit(std::string prompt, GenerateOptions options) {
+RequestId InferenceWorker::submit(std::string prompt, GenerateOptions options,
+                                  bool prompt_has_special_tokens) {
     const RequestId request_id = next_id_.fetch_add(1, std::memory_order_relaxed);
-    return submit_with_id(request_id, std::move(prompt), std::move(options));
+    return submit_with_id(request_id, std::move(prompt), std::move(options), prompt_has_special_tokens);
 }
 
 RequestId InferenceWorker::submit_multimodal(std::string prompt, std::vector<MultimodalInput> media_inputs,
-                                             GenerateOptions options) {
+                                             GenerateOptions options,
+                                             bool prompt_has_special_tokens) {
     const RequestId request_id = next_id_.fetch_add(1, std::memory_order_relaxed);
-    return submit_multimodal_with_id(request_id, std::move(prompt), std::move(media_inputs), std::move(options));
+    return submit_multimodal_with_id(request_id, std::move(prompt), std::move(media_inputs), std::move(options),
+                                     prompt_has_special_tokens);
 }
 
-RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options) {
+RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options,
+                                          bool prompt_has_special_tokens) {
     RequestId observed = next_id_.load(std::memory_order_relaxed);
     while (request_id >= observed &&
            !next_id_.compare_exchange_weak(observed, request_id + 1, std::memory_order_relaxed)) {
@@ -95,6 +99,7 @@ RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prom
     req->id = request_id;
     req->prompt = std::move(prompt);
     req->options = std::move(options);
+    req->prompt_has_special_tokens = prompt_has_special_tokens;
 
     {
         std::lock_guard lock(mutex_);
@@ -107,7 +112,8 @@ RequestId InferenceWorker::submit_with_id(RequestId request_id, std::string prom
 
 RequestId InferenceWorker::submit_multimodal_with_id(RequestId request_id, std::string prompt,
                                                      std::vector<MultimodalInput> media_inputs,
-                                                     GenerateOptions options) {
+                                                     GenerateOptions options,
+                                                     bool prompt_has_special_tokens) {
     RequestId observed = next_id_.load(std::memory_order_relaxed);
     while (request_id >= observed &&
            !next_id_.compare_exchange_weak(observed, request_id + 1, std::memory_order_relaxed)) {
@@ -118,6 +124,7 @@ RequestId InferenceWorker::submit_multimodal_with_id(RequestId request_id, std::
     req->prompt = std::move(prompt);
     req->media_inputs = std::move(media_inputs);
     req->options = std::move(options);
+    req->prompt_has_special_tokens = prompt_has_special_tokens;
 
     {
         std::lock_guard lock(mutex_);
@@ -142,13 +149,14 @@ void InferenceWorker::cancel(RequestId id) noexcept {
 }
 
 Error InferenceWorker::apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
-                                           bool add_assistant_turn, std::string &out_prompt) const {
+                                           bool add_assistant_turn, std::string &out_prompt,
+                                           std::vector<std::string> &out_stops) const {
     if (!model_ || !model_->is_loaded()) {
         return Error::make(ErrorCode::NotOpen, "Model is not loaded");
     }
 
     return model_->apply_chat_template(messages, add_assistant_turn, config_.chat_template_override,
-                                       config_.disable_thinking, out_prompt);
+                                       config_.disable_thinking, out_prompt, out_stops);
 }
 
 std::vector<int32_t> InferenceWorker::tokenize(std::string_view text, bool add_bos, bool special) const {
@@ -280,8 +288,13 @@ void InferenceWorker::process_request(GenerateRequest &req) {
             return;
         }
     } else {
-        // Tokenize prompt
-        auto prompt_tokens = model_->tokenize(req.prompt, true, false);
+        // Chat-template-formatted prompts contain special token syntax (e.g.
+        // <|turn>, <turn|>) that must be parsed into their token IDs.  The
+        // template engine already strips BOS when the model's vocab says
+        // add_bos=true, so passing add_special=true here re-adds it correctly.
+        // Raw prompts have no special token syntax, so parse_special=false.
+        const bool parse_special = req.prompt_has_special_tokens;
+        auto prompt_tokens = model_->tokenize(req.prompt, /* add_special */ true, parse_special);
         if (prompt_tokens.empty()) {
             if (callbacks_.on_error) {
                 callbacks_.on_error({req.id, ErrorCode::TokenizeFailed, "Prompt tokenization produced no tokens", {}});

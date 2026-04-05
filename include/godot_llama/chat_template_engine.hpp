@@ -27,7 +27,8 @@ public:
     [[nodiscard]] const std::string &template_override() const noexcept;
 
     [[nodiscard]] Error apply(const std::vector<std::pair<std::string, std::string>> &messages,
-                              bool add_assistant_turn, bool disable_thinking, std::string &out_prompt) const;
+                              bool add_assistant_turn, bool disable_thinking, std::string &out_prompt,
+                              std::vector<std::string> &out_stops) const;
 
 private:
     void reset() noexcept;

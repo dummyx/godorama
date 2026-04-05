@@ -40,12 +40,13 @@ TEST_CASE("ChatTemplateEngine applies enable_thinking correctly", "[chat_templat
     };
 
     std::string prompt;
-    const auto thinking_err = engine.apply(messages, true, false, prompt);
+    std::vector<std::string> stops;
+    const auto thinking_err = engine.apply(messages, true, false, prompt, stops);
     REQUIRE_FALSE(thinking_err);
     CHECK(prompt.find("<think>") != std::string::npos);
     CHECK(prompt.find("<answer>") == std::string::npos);
 
-    const auto non_thinking_err = engine.apply(messages, true, true, prompt);
+    const auto non_thinking_err = engine.apply(messages, true, true, prompt, stops);
     REQUIRE_FALSE(non_thinking_err);
     CHECK(prompt.find("<answer>") != std::string::npos);
     CHECK(prompt.find("<think>") == std::string::npos);

@@ -70,7 +70,8 @@ public:
     [[nodiscard]] Error apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
                                             bool add_assistant_turn, std::string_view template_override,
                                             bool disable_thinking,
-                                            std::string &out_prompt) const;
+                                            std::string &out_prompt,
+                                            std::vector<std::string> &out_stops) const;
     [[nodiscard]] Error apply_lora_adapters(llama_context *ctx) const;
 
     [[nodiscard]] std::vector<int32_t> tokenize(std::string_view text, bool add_bos, bool special) const;

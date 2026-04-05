@@ -116,8 +116,9 @@ public:
                 {"user", user_prompt},
         };
 
+        std::vector<std::string> unused_stops;
         Error err = generation_model->apply_chat_template(messages, true, chat_template_override, false,
-                                                          out_assembly.prompt);
+                                                          out_assembly.prompt, unused_stops);
         if (err) {
             out_assembly.prompt_style = "plain";
             out_assembly.prompt = "SYSTEM:\n" + system_prompt + "\n\nUSER:\n" + user_prompt + "\n\nASSISTANT:\n";

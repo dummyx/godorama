@@ -32,16 +32,21 @@ public:
     void stop() noexcept;
     [[nodiscard]] bool is_running() const noexcept;
 
-    [[nodiscard]] RequestId submit(std::string prompt, GenerateOptions options);
+    [[nodiscard]] RequestId submit(std::string prompt, GenerateOptions options,
+                                    bool prompt_has_special_tokens = false);
     [[nodiscard]] RequestId submit_multimodal(std::string prompt, std::vector<MultimodalInput> media_inputs,
-                                              GenerateOptions options);
-    [[nodiscard]] RequestId submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options);
+                                              GenerateOptions options,
+                                              bool prompt_has_special_tokens = false);
+    [[nodiscard]] RequestId submit_with_id(RequestId request_id, std::string prompt, GenerateOptions options,
+                                           bool prompt_has_special_tokens = false);
     [[nodiscard]] RequestId submit_multimodal_with_id(RequestId request_id, std::string prompt,
                                                       std::vector<MultimodalInput> media_inputs,
-                                                      GenerateOptions options);
+                                                      GenerateOptions options,
+                                                      bool prompt_has_special_tokens = false);
     void cancel(RequestId id) noexcept;
     [[nodiscard]] Error apply_chat_template(const std::vector<std::pair<std::string, std::string>> &messages,
-                                            bool add_assistant_turn, std::string &out_prompt) const;
+                                            bool add_assistant_turn, std::string &out_prompt,
+                                            std::vector<std::string> &out_stops) const;
 
     // Tokenize/detokenize are synchronous and safe to call from any thread.
     [[nodiscard]] std::vector<int32_t> tokenize(std::string_view text, bool add_bos, bool special) const;

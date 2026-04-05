@@ -87,7 +87,8 @@ int LlamaSession::open(const Ref<Resource> &config) {
         godot_llama::RequestCallbacks cbs;
         cbs.on_token = [this](const godot_llama::TokenEvent &ev) {
             std::lock_guard lock(event_mutex_);
-            token_events_.push_back({ev.request_id, String(ev.text.c_str()), ev.token_id});
+            token_events_.push_back(
+                    {ev.request_id, String::utf8(ev.text.c_str(), static_cast<int>(ev.text.size())), ev.token_id});
         };
         cbs.on_complete = [this](const godot_llama::GenerateResult &res) {
             Dictionary stats;
@@ -96,7 +97,9 @@ int LlamaSession::open(const Ref<Resource> &config) {
             stats["tokens_per_second"] = res.tokens_per_second;
 
             std::lock_guard lock(event_mutex_);
-            complete_events_.push_back({res.request_id, String(res.full_text.c_str()), stats});
+            complete_events_.push_back(
+                    {res.request_id, String::utf8(res.full_text.c_str(), static_cast<int>(res.full_text.size())),
+                     stats});
         };
         cbs.on_error = [this](const godot_llama::ErrorEvent &ev) {
             std::lock_guard lock(event_mutex_);
@@ -194,14 +197,18 @@ int LlamaSession::generate_messages_async(const Array &messages, const Dictionar
     }
 
     std::string prompt;
-    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt);
+    std::vector<std::string> template_stops;
+    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt, template_stops);
     if (template_err) {
         UtilityFunctions::push_error(String("LlamaSession generate_messages_async: ") + template_err.message.c_str());
         return -static_cast<int>(template_err.code);
     }
 
     auto opts = to_internal_options(options);
-    return worker_->submit(std::move(prompt), std::move(opts));
+    for (auto &s : template_stops) {
+        opts.stop.push_back(std::move(s));
+    }
+    return worker_->submit(std::move(prompt), std::move(opts), /* prompt_has_special_tokens */ true);
 }
 
 int LlamaSession::generate_multimodal_async(const String &prompt, const Array &media_inputs,
@@ -244,7 +251,8 @@ int LlamaSession::generate_multimodal_messages_async(const Array &messages, cons
     }
 
     std::string prompt;
-    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt);
+    std::vector<std::string> template_stops;
+    const auto template_err = worker_->apply_chat_template(internal_messages, add_assistant_turn, prompt, template_stops);
     if (template_err) {
         UtilityFunctions::push_error(
                 String("LlamaSession generate_multimodal_messages_async: ") + template_err.message.c_str());
@@ -252,7 +260,11 @@ int LlamaSession::generate_multimodal_messages_async(const Array &messages, cons
     }
 
     auto opts = to_internal_options(options);
-    return worker_->submit_multimodal(std::move(prompt), std::move(internal_media), std::move(opts));
+    for (auto &s : template_stops) {
+        opts.stop.push_back(std::move(s));
+    }
+    return worker_->submit_multimodal(std::move(prompt), std::move(internal_media), std::move(opts),
+                                      /* prompt_has_special_tokens */ true);
 }
 
 void LlamaSession::cancel(int request_id) {
