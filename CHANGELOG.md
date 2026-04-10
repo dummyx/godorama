@@ -10,6 +10,8 @@
 - `LlamaSession` capability introspection for loaded LoRA adapter count plus image/audio multimodal support
 - `LlamaSession.generate_multimodal_async()` for multimodal generation with image/audio inputs
 - `LlamaSession.generate_multimodal_messages_async()` for message-templated multimodal generation
+- `LlamaSession.image_to_media_input()` convenience helper for `Image` -> PNG media dictionaries
+- `LlamaSession.get_multimodal_token_count()` for completed multimodal requests
 - in-memory `PackedByteArray` media input support via `data` key in media input dictionaries
 - `MultimodalInput.data` field for passing image/audio bytes without a file path
 
@@ -17,7 +19,13 @@
 - Multimodal generation methods are now fully bound and documented
 - `LlamaMultimodalHandle::evaluate_prompt` accepts both file-path and in-memory buffer media
 - Media input dictionaries now accept either `path` or `data` (or both, with `data` taking precedence)
+- Multimodal submission now validates media dictionary shape, readable file paths, and media-marker counts before enqueuing worker requests
+- `completed` stats now include `multimodal_token_count` for multimodal requests
 - Updated `API.md` with full multimodal method documentation and media input dictionary format
+- RAG storage now builds against the vendored libSQL amalgamation instead of the old bundled SQLite path
+- RAG retrieval now defaults to exact cosine SQL search over libSQL vector columns
+- `RagCorpusConfig` no longer exposes `vector_metric`; the current public RAG surface is cosine-only
+- Legacy RAG schema v1 `embedding_blob` databases now migrate to schema v2 `embedding_vec F32_BLOB` storage on open
 
 ## [0.2.0] - 2026-04-02
 

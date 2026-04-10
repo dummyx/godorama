@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 
 namespace godot_llama::rag {
 namespace {
@@ -68,15 +69,8 @@ public:
             return Error::make(ErrorCode::InvalidParameter, "Query is empty");
         }
 
-        std::vector<ChunkRecord> candidates;
-        Error err = store.fetch_candidate_chunks(options, candidates);
-        if (err) {
-            return err;
-        }
-        out_stats.scanned_chunks = static_cast<int32_t>(candidates.size());
-
         int32_t query_token_count = 0;
-        err = embedder.count_tokens(query, query_token_count);
+        Error err = embedder.count_tokens(query, query_token_count);
         if (err) {
             return err;
         }
@@ -92,25 +86,51 @@ public:
         }
 
         const auto &query_embedding = query_embeddings.front();
+        std::vector<VectorSearchHit> vector_hits;
+        err = store.exact_vector_search(query_embedding, options, vector_hits);
+        if (err) {
+            return err;
+        }
+        out_stats.search_mode = "exact_sql";
+        out_stats.scanned_chunks = static_cast<int32_t>(vector_hits.size());
+
+        std::vector<std::string> chunk_ids;
+        chunk_ids.reserve(vector_hits.size());
+        for (const auto &vector_hit : vector_hits) {
+            chunk_ids.push_back(vector_hit.chunk_id);
+        }
+
+        std::vector<ChunkRecord> fetched_chunks;
+        err = store.fetch_chunks_by_ids(chunk_ids, options.use_mmr, fetched_chunks);
+        if (err) {
+            return err;
+        }
+
+        std::unordered_map<std::string, ChunkRecord> chunks_by_id;
+        chunks_by_id.reserve(fetched_chunks.size());
+        for (auto &chunk : fetched_chunks) {
+            chunks_by_id.emplace(chunk.chunk_id, std::move(chunk));
+        }
+
         std::vector<ScoredCandidate> scored;
-        scored.reserve(candidates.size());
-
-        float min_score = 0.0f;
-        float max_score = 0.0f;
-        bool first_score = true;
-
-        for (const auto &chunk : candidates) {
+        scored.reserve(vector_hits.size());
+        for (const auto &vector_hit : vector_hits) {
             if (is_cancelled && is_cancelled()) {
                 return Error::make(ErrorCode::Cancelled, "Retrieval cancelled");
             }
-            if (chunk.embedding.empty()) {
+
+            const auto found = chunks_by_id.find(vector_hit.chunk_id);
+            if (found == chunks_by_id.end()) {
+                return Error::make(ErrorCode::StorageCorrupt, "Chunk metadata row missing for vector search hit",
+                                   vector_hit.chunk_id);
+            }
+
+            ChunkRecord &chunk = found->second;
+            const float raw_score = 1.0f - vector_hit.distance;
+            if (raw_score < options.score_threshold) {
                 ++out_stats.filtered_chunks;
                 continue;
             }
-
-            const bool cosine = chunk.embedding_info.metric == VectorMetric::Cosine || chunk.embedding_info.normalized;
-            const float raw_score =
-                    cosine ? cosine_similarity(query_embedding, chunk.embedding) : dot_product(query_embedding, chunk.embedding);
 
             RetrievalHit hit;
             hit.chunk_id = chunk.chunk_id;
@@ -120,51 +140,21 @@ public:
             hit.excerpt = chunk.display_text;
             hit.metadata = chunk.metadata;
             hit.raw_score = raw_score;
+            hit.relevance_score = std::clamp((raw_score + 1.0f) * 0.5f, 0.0f, 1.0f);
             hit.byte_start = chunk.byte_start;
             hit.byte_end = chunk.byte_end;
             hit.char_start = chunk.char_start;
             hit.char_end = chunk.char_end;
             hit.token_count = chunk.token_count;
 
-            if (first_score) {
-                min_score = raw_score;
-                max_score = raw_score;
-                first_score = false;
-            } else {
-                min_score = std::min(min_score, raw_score);
-                max_score = std::max(max_score, raw_score);
+            if (options.use_mmr && chunk.embedding.empty()) {
+                return Error::make(ErrorCode::StorageCorrupt, "MMR retrieval requires chunk embeddings",
+                                   chunk.chunk_id);
             }
 
-            scored.push_back({std::move(hit), chunk.embedding});
+            scored.push_back({std::move(hit), std::move(chunk.embedding)});
         }
 
-        const float range = max_score - min_score;
-        for (auto &candidate : scored) {
-            if (candidate.hit.raw_score < options.score_threshold) {
-                continue;
-            }
-
-            if (candidate.hit.raw_score >= -1.0f && candidate.hit.raw_score <= 1.0f) {
-                candidate.hit.relevance_score = std::clamp((candidate.hit.raw_score + 1.0f) * 0.5f, 0.0f, 1.0f);
-            } else if (range > 0.0f) {
-                candidate.hit.relevance_score = (candidate.hit.raw_score - min_score) / range;
-            } else {
-                candidate.hit.relevance_score = 1.0f;
-            }
-        }
-
-        scored.erase(std::remove_if(scored.begin(), scored.end(), [&](const ScoredCandidate &candidate) {
-                         return candidate.hit.raw_score < options.score_threshold;
-                     }),
-                     scored.end());
-
-        std::sort(scored.begin(), scored.end(), [](const ScoredCandidate &lhs, const ScoredCandidate &rhs) {
-            return lhs.hit.relevance_score > rhs.hit.relevance_score;
-        });
-
-        if (static_cast<int32_t>(scored.size()) > options.candidate_k) {
-            scored.resize(static_cast<size_t>(options.candidate_k));
-        }
         out_stats.candidate_chunks = static_cast<int32_t>(scored.size());
 
         if (options.use_reranker && reranker && reranker->is_available()) {

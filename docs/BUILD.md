@@ -6,7 +6,8 @@
 - Ninja
 - C++20 compiler (GCC 13+, Clang 16+, MSVC 2022+)
 - Git (for submodules)
-- Tcl shell and `make`/`nmake` are required to generate the bundled SQLite amalgamation during the build
+- A checked-out `thirdparty/libsql` tree at commit `0653c5788d77ef16a97c56ff3e9fdc11717a72d9`
+  (the build uses the vendored libSQL amalgamation under `libsql-ffi/bundled/src/`)
 
 ### Optional
 
@@ -17,6 +18,8 @@
 
 ```sh
 git submodule update --init --recursive
+git clone https://github.com/tursodatabase/libsql.git thirdparty/libsql
+git -C thirdparty/libsql checkout 0653c5788d77ef16a97c56ff3e9fdc11717a72d9
 ```
 
 ## Build commands

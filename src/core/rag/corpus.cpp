@@ -58,6 +58,9 @@ Error CorpusEngine::open(const CorpusConfig &config, std::unique_ptr<CorpusStore
     if (!embedder->is_open()) {
         return Error::make(ErrorCode::NotOpen, "Embedder is not open");
     }
+    if (embedder->info().metric != VectorMetric::Cosine) {
+        return Error::make(ErrorCode::InvalidParameter, "RAG only supports cosine embeddings");
+    }
 
     config_ = config;
     store_ = std::move(store);
@@ -88,6 +91,9 @@ Error CorpusEngine::open(const CorpusConfig &config, std::unique_ptr<CorpusStore
             close();
             return err;
         }
+    } else if (embedding_state.metric != VectorMetric::Cosine) {
+        close();
+        return Error::make(ErrorCode::InvalidParameter, "Stored corpus embeddings must use cosine retrieval");
     }
 
     open_ = true;

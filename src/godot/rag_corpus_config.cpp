@@ -13,7 +13,7 @@ RagCorpusConfig::RagCorpusConfig() {
 void RagCorpusConfig::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_storage_path", "path"), &RagCorpusConfig::set_storage_path);
     ClassDB::bind_method(D_METHOD("get_storage_path"), &RagCorpusConfig::get_storage_path);
-    ADD_PROPERTY(PropertyInfo(Variant::STRING, "storage_path", PROPERTY_HINT_SAVE_FILE, "*.sqlite3,*.db"),
+    ADD_PROPERTY(PropertyInfo(Variant::STRING, "storage_path", PROPERTY_HINT_SAVE_FILE, "*.db,*.libsql"),
                  "set_storage_path", "get_storage_path");
 
     ClassDB::bind_method(D_METHOD("set_chunk_size_tokens", "value"), &RagCorpusConfig::set_chunk_size_tokens);
@@ -29,11 +29,6 @@ void RagCorpusConfig::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_normalize_embeddings"), &RagCorpusConfig::get_normalize_embeddings);
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize_embeddings"), "set_normalize_embeddings",
                  "get_normalize_embeddings");
-
-    ClassDB::bind_method(D_METHOD("set_vector_metric", "value"), &RagCorpusConfig::set_vector_metric);
-    ClassDB::bind_method(D_METHOD("get_vector_metric"), &RagCorpusConfig::get_vector_metric);
-    ADD_PROPERTY(PropertyInfo(Variant::STRING, "vector_metric", PROPERTY_HINT_ENUM, "cosine,dot"), "set_vector_metric",
-                 "get_vector_metric");
 
     ClassDB::bind_method(D_METHOD("set_max_batch_texts", "value"), &RagCorpusConfig::set_max_batch_texts);
     ClassDB::bind_method(D_METHOD("get_max_batch_texts"), &RagCorpusConfig::get_max_batch_texts);
@@ -84,9 +79,6 @@ int32_t RagCorpusConfig::get_chunk_overlap_tokens() const { return chunk_overlap
 
 void RagCorpusConfig::set_normalize_embeddings(bool value) { normalize_embeddings_ = value; }
 bool RagCorpusConfig::get_normalize_embeddings() const { return normalize_embeddings_; }
-
-void RagCorpusConfig::set_vector_metric(const String &value) { vector_metric_ = value; }
-String RagCorpusConfig::get_vector_metric() const { return vector_metric_; }
 
 void RagCorpusConfig::set_max_batch_texts(int32_t value) { max_batch_texts_ = value > 0 ? value : 8; }
 int32_t RagCorpusConfig::get_max_batch_texts() const { return max_batch_texts_; }

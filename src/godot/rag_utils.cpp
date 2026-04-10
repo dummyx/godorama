@@ -179,7 +179,9 @@ godot::Dictionary to_godot_dictionary(const rag::RetrievalStats &stats) {
     dictionary["filtered_chunks"] = stats.filtered_chunks;
     dictionary["deduplicated_chunks"] = stats.deduplicated_chunks;
     dictionary["returned_chunks"] = stats.returned_chunks;
+    dictionary["ann_fallback_used"] = stats.ann_fallback_used;
     dictionary["reranker_used"] = stats.reranker_used;
+    dictionary["search_mode"] = godot::String(stats.search_mode.c_str());
     dictionary["reranker_status"] = godot::String(stats.reranker_status.c_str());
 
     godot::Array truncated;

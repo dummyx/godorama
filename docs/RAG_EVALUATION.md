@@ -28,6 +28,6 @@ Run date: 2026-04-02
 
 ## Notes
 
-- The evaluation uses the real SQLite-backed `CorpusEngine`.
+- The evaluation uses the real libSQL-backed `CorpusEngine`.
 - The embedder is mocked so the harness is fast, deterministic, and CI-friendly.
 - `answer_ms` is `0` in the current fixture harness because it validates retrieval quality and corpus latency, not model-token generation.

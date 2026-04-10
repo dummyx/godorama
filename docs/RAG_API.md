@@ -6,11 +6,10 @@ Editor-facing resource for corpus storage and embedding settings.
 
 Properties:
 
-- `storage_path`: SQLite database path
+- `storage_path`: local libSQL database path
 - `chunk_size_tokens`: hard token budget per chunk
 - `chunk_overlap_tokens`: overlap carried into the next chunk
 - `normalize_embeddings`: normalize vectors before persistence/retrieval
-- `vector_metric`: `cosine` or `dot`
 - `max_batch_texts`: maximum texts accepted per embedding call
 - `embedding_model_path`: GGUF model path for the embedding role
 - `embedding_n_ctx`
@@ -24,7 +23,7 @@ Properties:
 
 `open(config) -> int`
 
-- blocks while opening the embedding model and SQLite corpus
+- blocks while opening the embedding model and local libSQL corpus
 - main-thread only
 
 `upsert_text_async(source_id, text, metadata := {}) -> int`
@@ -41,6 +40,7 @@ Properties:
 
 - non-blocking
 - emits structured hits and retrieval stats
+- exact cosine retrieval runs in SQL by default
 
 Retrieval options:
 
@@ -54,6 +54,11 @@ Retrieval options:
 - `metadata_filter`
 - `use_mmr`
 - `use_reranker`
+
+Retrieval stats include:
+
+- `search_mode`: currently `exact_sql`
+- `reranker_status`
 
 ## `RagAnswerSession`
 

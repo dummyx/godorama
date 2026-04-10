@@ -74,10 +74,10 @@
 - Structured `Error` type with code + message + context
 - Message templating is delegated to the model/chat-template layer before submission
 - `rag::CorpusEngine`: synchronous core RAG coordinator
-- `rag::SqliteCorpusStore`: schema-versioned persistent corpus store
+- `rag::LibSqlCorpusStore`: schema-versioned persistent corpus store backed by embedded libSQL vector SQL
 - `rag::DeterministicChunker`: token-aware chunking with stable offsets/IDs
 - `rag::LlamaEmbedder`: dedicated embedding model/context path
-- `rag::DenseRetriever`: exact dense retrieval with dedupe and MMR
+- `rag::DenseRetriever`: exact cosine SQL retrieval with dedupe and MMR
 - `rag::GroundedContextPacker`: token-budgeted grounded prompt assembly
 - No Godot binding logic
 
@@ -118,6 +118,13 @@ session.generate_async(prompt)
                                   sample loop:
                                     sample token
                                     on_token callback ───→ queued
+                                  on_complete callback ──→ queued
+session.generate_multimodal_async(prompt, media_inputs)
+  ├── validate media dictionaries, readable paths, marker count
+  └── enqueue request ───────→  dequeue request
+                                  mtmd tokenize + media encode
+                                  decode multimodal prompt
+                                  shared sampling loop
                                   on_complete callback ──→ queued
 
 session.poll() (each frame)
@@ -178,4 +185,6 @@ This keeps downstream Godot runs readable while still surfacing real warnings an
 
 - LoRA support uses the stable `llama.h` adapter API and is wired as a usable scaffold today.
 - Image/audio support is intentionally split behind `LlamaMultimodalHandle` and `LlamaMultimodalConfig`.
-- The pinned upstream `libmtmd` API is marked experimental, so `godorama` currently limits the Godot-facing surface to configuration plus capability introspection rather than a bound media request API.
+- The Godot-facing surface includes `generate_multimodal_async()` and `generate_multimodal_messages_async()` with file-path or in-memory media dictionaries.
+- `LlamaSession` performs synchronous media dictionary validation in the Godot layer, then the worker uses `LlamaMultimodalHandle::evaluate_prompt()` to tokenize media and decode the combined prompt off the main thread.
+- Multimodal accounting stays request-scoped: completed multimodal requests carry `multimodal_token_count` in `completed` stats and can be queried later by `request_id`.

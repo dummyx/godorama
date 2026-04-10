@@ -7,7 +7,7 @@
 
 namespace godot_llama::rag {
 
-[[nodiscard]] Error make_sqlite_corpus_store(const CorpusConfig &config, std::unique_ptr<CorpusStore> &out_store);
+[[nodiscard]] Error make_libsql_corpus_store(const CorpusConfig &config, std::unique_ptr<CorpusStore> &out_store);
 [[nodiscard]] std::unique_ptr<Chunker> make_deterministic_chunker();
 [[nodiscard]] Error make_llama_embedder(const CorpusConfig &config, std::unique_ptr<Embedder> &out_embedder);
 [[nodiscard]] std::unique_ptr<Retriever> make_dense_retriever();

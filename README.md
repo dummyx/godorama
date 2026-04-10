@@ -17,9 +17,11 @@ It is intended to be a production-facing local runtime for Godot projects, not a
 - `LlamaSession`
   - async text generation
   - message-based chat templating
+  - multimodal generation with image/audio inputs
   - tokenization / detokenization
   - text embeddings
   - LoRA adapter count and multimodal capability introspection
+  - request-scoped multimodal token accounting
 - `LlamaEvalSession`
   - async embedding-prefill evaluation over `inputs_embeds`
   - optional hidden-state readback
@@ -35,7 +37,10 @@ It is intended to be a production-facing local runtime for Godot projects, not a
 - Chat message templating goes through `llama.cpp`'s `common/chat.*` Jinja path, not the limited `llama_chat_apply_template()` helper.
 - `disable_thinking` is meaningful for message-templated generation. It is not a magic prompt rewrite for raw `generate_async(prompt)`.
 - `LlamaEvalSession` is the supported way to run prefill/eval style embedding inputs from Godot without exposing raw `llama_*` handles.
-- Multimodal configuration currently scaffolds `libmtmd` loading and image/audio capability detection. It does not yet expose a public Godot media-generation request API.
+- Multimodal requests are submitted through `generate_multimodal_async()` / `generate_multimodal_messages_async()`. The Godot layer validates media dictionaries, file readability, and media-marker counts before the request reaches the worker thread.
+- Completed multimodal requests include `multimodal_token_count` in their `completed` stats, and `get_multimodal_token_count(request_id)` returns the stored count for completed multimodal requests.
+- RAG storage is local-only and embedded. `RagCorpus` uses libSQL in-process, with exact cosine retrieval executed in SQL by default.
+- The current RAG surface is intentionally cosine-only. The old `vector_metric` setting is no longer part of `RagCorpusConfig`.
 - Runtime log verbosity is filtered by default. Set `GODORAMA_LLAMA_LOG_LEVEL=debug|info|warn|error|silent` to override.
 
 ## Build
@@ -45,6 +50,10 @@ cmake --preset dev
 cmake --build --preset build-dev
 ctest --preset test-dev --output-on-failure
 ```
+
+The current build also expects a `thirdparty/libsql` checkout at commit
+`0653c5788d77ef16a97c56ff3e9fdc11717a72d9`. `docs/BUILD.md` includes the exact
+setup commands.
 
 Optional multimodal scaffold:
 

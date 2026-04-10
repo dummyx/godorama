@@ -143,7 +143,9 @@ struct RetrievalStats {
     int32_t filtered_chunks = 0;
     int32_t deduplicated_chunks = 0;
     int32_t returned_chunks = 0;
+    bool ann_fallback_used = false;
     bool reranker_used = false;
+    std::string search_mode;
     std::string reranker_status;
     std::vector<std::string> truncated_chunk_ids;
 };

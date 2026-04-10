@@ -23,6 +23,8 @@ add_executable(godot_llama_tests
     test_rag_types.cpp
     test_rag_chunker.cpp
     test_rag_retriever.cpp
+    test_libsql_local_store.cpp
+    test_worker_multimodal.cpp
 )
 
 target_link_libraries(godot_llama_tests

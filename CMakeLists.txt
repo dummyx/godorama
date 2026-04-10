@@ -29,82 +29,32 @@ endif()
 
 # ---- Third-party dependencies ----
 
-# sqlite: generate the amalgamation from the pinned bundled source tree
-set(SQLITE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/sqlite")
-set(SQLITE_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/thirdparty/sqlite")
-set(SQLITE_AMALGAMATION_C "${SQLITE_BUILD_DIR}/sqlite3.c")
-set(SQLITE_AMALGAMATION_H "${SQLITE_BUILD_DIR}/sqlite3.h")
+# libSQL: use the pinned local amalgamation with embedded vector SQL support
+set(LIBSQL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/libsql")
+set(LIBSQL_AMALGAMATION_DIR "${LIBSQL_SOURCE_DIR}/libsql-ffi/bundled/src")
+set(LIBSQL_AMALGAMATION_C "${LIBSQL_AMALGAMATION_DIR}/sqlite3.c")
+set(LIBSQL_AMALGAMATION_H "${LIBSQL_AMALGAMATION_DIR}/sqlite3.h")
 
-if(MSVC)
-    find_program(SQLITE_MAKE_TOOL nmake REQUIRED)
-    set(SQLITE_PREPARE_AMALGAMATION_COMMAND
-        ${CMAKE_COMMAND}
-        -E
-        echo
-        "Preparing bundled SQLite amalgamation with nmake"
-    )
-    set(SQLITE_GENERATE_AMALGAMATION_COMMAND
-        ${SQLITE_MAKE_TOOL}
-        /f
-        ${SQLITE_SOURCE_DIR}/Makefile.msc
-        TOP=${SQLITE_SOURCE_DIR}
-        sqlite3.c
-        sqlite3.h
-    )
-else()
-    find_program(SQLITE_MAKE_TOOL NAMES gmake make REQUIRED)
-    set(SQLITE_PREPARE_AMALGAMATION_COMMAND
-        ${CMAKE_COMMAND}
-        -E
-        env
-        CC=${CMAKE_C_COMPILER}
-        ${SQLITE_SOURCE_DIR}/configure
-    )
-    set(SQLITE_GENERATE_AMALGAMATION_COMMAND
-        ${SQLITE_MAKE_TOOL}
-        sqlite3.c
-        sqlite3.h
-    )
+if(NOT EXISTS "${LIBSQL_AMALGAMATION_C}" OR NOT EXISTS "${LIBSQL_AMALGAMATION_H}")
+    message(FATAL_ERROR "libSQL amalgamation not found under ${LIBSQL_AMALGAMATION_DIR}")
 endif()
 
-add_custom_command(
-    OUTPUT
-        ${SQLITE_AMALGAMATION_C}
-        ${SQLITE_AMALGAMATION_H}
-    COMMAND
-        ${CMAKE_COMMAND} -E make_directory ${SQLITE_BUILD_DIR}
-    COMMAND
-        ${CMAKE_COMMAND} -E chdir ${SQLITE_BUILD_DIR} ${SQLITE_PREPARE_AMALGAMATION_COMMAND}
-    COMMAND
-        ${CMAKE_COMMAND} -E chdir ${SQLITE_BUILD_DIR} ${SQLITE_GENERATE_AMALGAMATION_COMMAND}
-    DEPENDS
-        ${SQLITE_SOURCE_DIR}/configure
-        ${SQLITE_SOURCE_DIR}/Makefile.in
-        ${SQLITE_SOURCE_DIR}/Makefile.msc
-        ${SQLITE_SOURCE_DIR}/main.mk
-        ${SQLITE_SOURCE_DIR}/manifest.uuid
-    COMMENT
-        "Generating bundled SQLite amalgamation"
-    VERBATIM
+add_library(godot-llama-libsql STATIC
+    ${LIBSQL_AMALGAMATION_C}
 )
-
-add_library(godot-llama-sqlite3 STATIC
-    ${SQLITE_AMALGAMATION_C}
-)
-target_include_directories(godot-llama-sqlite3
+target_include_directories(godot-llama-libsql
     PUBLIC
-        ${SQLITE_BUILD_DIR}
-        ${SQLITE_SOURCE_DIR}/src
+        ${LIBSQL_AMALGAMATION_DIR}
 )
-target_compile_definitions(godot-llama-sqlite3
+target_compile_definitions(godot-llama-libsql
     PRIVATE
         SQLITE_THREADSAFE=1
         SQLITE_OMIT_LOAD_EXTENSION=1
 )
-set_target_properties(godot-llama-sqlite3 PROPERTIES
+set_target_properties(godot-llama-libsql PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
-add_library(SQLite::SQLite3 ALIAS godot-llama-sqlite3)
+add_library(godot_llama::libsql ALIAS godot-llama-libsql)
 
 # llama.cpp: build as static library, disable standalone extras
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -214,7 +164,7 @@ add_library(godot-llama-rag STATIC
     src/core/rag/corpus.cpp
     src/core/rag/deterministic_chunker.cpp
     src/core/rag/llama_embedder.cpp
-    src/core/rag/sqlite_corpus_store.cpp
+    src/core/rag/libsql_corpus_store.cpp
     src/core/rag/dense_retriever.cpp
     src/core/rag/noop_reranker.cpp
     src/core/rag/grounded_context_packer.cpp
@@ -230,7 +180,7 @@ target_include_directories(godot-llama-rag
 target_link_libraries(godot-llama-rag
     PUBLIC
         godot-llama-core
-        SQLite::SQLite3
+        godot_llama::libsql
 )
 target_compile_options(godot-llama-rag PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>

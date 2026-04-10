@@ -25,9 +25,6 @@ public:
     void set_normalize_embeddings(bool value);
     bool get_normalize_embeddings() const;
 
-    void set_vector_metric(const String &value);
-    String get_vector_metric() const;
-
     void set_max_batch_texts(int32_t value);
     int32_t get_max_batch_texts() const;
 
@@ -60,7 +57,6 @@ private:
     int32_t chunk_size_tokens_ = 256;
     int32_t chunk_overlap_tokens_ = 32;
     bool normalize_embeddings_ = true;
-    String vector_metric_ = "cosine";
     int32_t max_batch_texts_ = 8;
     String embedding_model_path_;
     int32_t embedding_n_ctx_ = 2048;

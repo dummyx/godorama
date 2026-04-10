@@ -56,7 +56,7 @@ int RagCorpus::open(const Ref<Resource> &config) {
     auto engine = std::make_shared<rag::CorpusEngine>();
 
     std::unique_ptr<rag::CorpusStore> store;
-    godot_llama::Error err = rag::make_sqlite_corpus_store(internal_config, store);
+    godot_llama::Error err = rag::make_libsql_corpus_store(internal_config, store);
     if (err) {
         UtilityFunctions::push_error(String("RagCorpus open: ") + err.message.c_str());
         return static_cast<int>(err.code);
@@ -409,8 +409,7 @@ rag::CorpusConfig RagCorpus::to_internal_config(const Ref<Resource> &config) con
     internal.chunking.chunk_size_tokens = rag_config->get_chunk_size_tokens();
     internal.chunking.chunk_overlap_tokens = rag_config->get_chunk_overlap_tokens();
     internal.normalize_embeddings = rag_config->get_normalize_embeddings();
-    internal.vector_metric =
-            rag::parse_vector_metric(String(rag_config->get_vector_metric()).utf8().get_data()).value_or(rag::VectorMetric::Cosine);
+    internal.vector_metric = rag::VectorMetric::Cosine;
     internal.max_batch_texts = rag_config->get_max_batch_texts();
     internal.embedding_model.model_path = String(rag_config->get_embedding_model_path()).utf8().get_data();
     internal.embedding_model.n_ctx = rag_config->get_embedding_n_ctx();

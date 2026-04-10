@@ -31,6 +31,10 @@ void normalize_vector(std::vector<float> &vector) {
 class LlamaEmbedder final : public Embedder {
 public:
     [[nodiscard]] Error open(const CorpusConfig &config) {
+        if (config.vector_metric != VectorMetric::Cosine) {
+            return Error::make(ErrorCode::InvalidParameter, "RAG embeddings only support cosine retrieval");
+        }
+
         ModelConfig embedding_config = config.embedding_model;
         embedding_config.embeddings_enabled = true;
 

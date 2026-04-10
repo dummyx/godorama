@@ -47,6 +47,11 @@ public:
                                       const ChunkingConfig &config, std::vector<ChunkRecord> &out_chunks) const = 0;
 };
 
+struct VectorSearchHit {
+    std::string chunk_id;
+    float distance = 0.0f;
+};
+
 class CorpusStore {
 public:
     virtual ~CorpusStore() = default;
@@ -63,8 +68,11 @@ public:
     [[nodiscard]] virtual Error clear(IngestStats &out_stats) = 0;
     [[nodiscard]] virtual Error list_sources(std::vector<SourceRecord> &out_sources) const = 0;
     [[nodiscard]] virtual Error get_source(std::string_view source_id, std::optional<SourceRecord> &out_source) const = 0;
-    [[nodiscard]] virtual Error fetch_candidate_chunks(const RetrievalOptions &options,
-                                                       std::vector<ChunkRecord> &out_chunks) const = 0;
+    [[nodiscard]] virtual Error exact_vector_search(const std::vector<float> &query_vector,
+                                                    const RetrievalOptions &options,
+                                                    std::vector<VectorSearchHit> &out_hits) const = 0;
+    [[nodiscard]] virtual Error fetch_chunks_by_ids(const std::vector<std::string> &chunk_ids, bool include_embeddings,
+                                                    std::vector<ChunkRecord> &out_chunks) const = 0;
     [[nodiscard]] virtual Error get_stats(CorpusStats &out_stats) const = 0;
 };
 

@@ -97,6 +97,7 @@ Submits a multimodal generation request with image and/or audio inputs. Requires
 - **Notes**:
   - The prompt must contain one `<__media__>` marker (or the configured `media_marker`) for each media input.
   - `media_inputs` is an `Array` of dictionaries, each with the keys documented under [Media Input Dictionary](#media-input-dictionary).
+  - The Godot layer validates each media dictionary, readable file paths, and marker count before the request is queued.
   - Emits `token_emitted`, `completed`, `failed`, or `cancelled` through `poll()` like other generation methods.
 
 #### `generate_multimodal_messages_async(messages: Array, media_inputs: Array, options: Dictionary = {}, add_assistant_turn: bool = true) -> int`
@@ -108,6 +109,13 @@ Submits a message-templated multimodal generation request. Combines `generate_me
   - The resulting prompt from chat template expansion must contain one media marker per media input.
   - `messages` follows the same `{role, content}` format as `generate_messages_async`.
   - `media_inputs` follows the same format as `generate_multimodal_async`.
+  - The expanded prompt is validated against the configured media marker before the request is queued.
+
+#### `image_to_media_input(image: Image) -> Dictionary`
+Static convenience helper that converts a Godot `Image` into a multimodal media dictionary using PNG bytes.
+- **Blocks**: Yes (fast)
+- **Thread-safe**: Yes
+- **Returns**: `{"data": PackedByteArray, "type": "image"}` on success, or an empty dictionary on failure
 
 #### `cancel(request_id: int)`
 Cancels a pending or in-progress generation request.
@@ -149,6 +157,12 @@ Returns the multimodal audio sample rate in Hz, or `-1` when audio input is unav
 - **Blocks**: No
 - **Thread-safe**: Yes
 
+#### `get_multimodal_token_count(request_id: int) -> int`
+Returns the stored multimodal token count for a completed multimodal request.
+- **Blocks**: No
+- **Thread-safe**: Yes
+- **Returns**: token count for the completed request, or `-1` when no completed multimodal record is available for that `request_id`
+
 #### `poll()`
 Flushes queued events from the worker thread and emits signals.
 Must be called each frame (e.g., from `_process`).
@@ -176,6 +190,8 @@ Each element of the `media_inputs` array passed to `generate_multimodal_async` o
 Supported image formats: JPG, PNG, BMP, GIF, and others supported by `stb_image`.
 Supported audio formats: WAV, MP3, FLAC, and others supported by `miniaudio`.
 
+Invalid entries are rejected immediately at submission time. Each array element must be a `Dictionary`, `path` must point to a readable file when `data` is empty, and `data` must be a non-empty `PackedByteArray` if provided.
+
 ### Generation Options Dictionary
 
 | Key | Type | Default | Description |
@@ -202,6 +218,7 @@ Emitted when generation completes. `stats` contains:
 - `tokens_generated: int`
 - `time_ms: float`
 - `tokens_per_second: float`
+- `multimodal_token_count: int` for multimodal requests
 
 #### `failed(request_id: int, error_code: int, error_message: String, details: String)`
 Emitted on generation failure.
@@ -281,7 +298,6 @@ Key properties:
 - `chunk_size_tokens`
 - `chunk_overlap_tokens`
 - `normalize_embeddings`
-- `vector_metric`
 - `max_batch_texts`
 - `embedding_model_path`
 - `embedding_n_ctx`
@@ -314,6 +330,11 @@ Signals:
 - `ingest_completed(job_id, stats)`
 - `retrieve_completed(request_id, hits, stats)`
 - `failed(request_id_or_job_id, error_code, error_message, details)`
+
+Notes:
+
+- RAG retrieval is cosine-only.
+- `retrieve_completed(..., stats)` now reports `search_mode`, which is currently `exact_sql` for the embedded libSQL path.
 
 ### `RagAnswerSession`
 

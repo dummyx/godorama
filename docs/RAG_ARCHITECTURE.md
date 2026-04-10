@@ -13,8 +13,8 @@ The core RAG path is:
 1. normalize UTF-8 text or file input
 2. chunk deterministically with token-count enforcement
 3. embed chunks with a dedicated embedding context
-4. persist source/chunk rows and embeddings in SQLite
-5. retrieve with exact dense search, filter, dedupe, and MMR
+4. persist source/chunk rows and embeddings in embedded libSQL
+5. retrieve with exact cosine SQL search, filter, dedupe, and MMR
 6. pack grounded context under a generation-token budget
 7. stream answer tokens through `InferenceWorker`
 
@@ -31,14 +31,14 @@ The shipped concrete implementations are:
 
 - `DeterministicChunker`
 - `LlamaEmbedder`
-- `SqliteCorpusStore`
+- `LibSqlCorpusStore`
 - `DenseRetriever`
 - `NoopReranker`
 - `GroundedContextPacker`
 
 ## Persistence
 
-The corpus store uses a local SQLite database with schema version `1`.
+The corpus store uses a local embedded libSQL database with schema version `2`.
 
 Stored entities:
 
@@ -53,8 +53,11 @@ Stored entities:
 - `embedding_fingerprint`
 - `embedding_dimensions`
 - `embedding_normalized`
+- `embedding_storage_format`
 - `vector_metric`
 - `pooling_type`
+- `ann_index_ready`
+- `ann_index_metric`
 
 Chunk rows persist:
 
@@ -66,14 +69,14 @@ Chunk rows persist:
 - token count
 - embedding fingerprint and dimensions
 - vector metric and normalization flag
-- serialized float embedding blob
+- libSQL `F32_BLOB` vector storage in `embedding_vec`
 
 ## Retrieval
 
-The v1 retriever is exact dense search:
+The current retriever is exact cosine SQL search:
 
 - query embedding through `LlamaEmbedder` or `MockEmbedder`
-- filtered candidate scan from SQLite
+- `vector_distance_cos(embedding_vec, ?)` ordering inside libSQL
 - normalized higher-is-better relevance score
 - overlap suppression for near-duplicate chunks
 - optional MMR diversification

@@ -13,7 +13,7 @@ namespace {
 std::filesystem::path evaluation_db_path() {
     const auto base = std::filesystem::temp_directory_path() / "godot_llama_rag_eval";
     std::filesystem::create_directories(base);
-    const auto path = base / "fixture.sqlite3";
+    const auto path = base / "fixture.db";
     std::filesystem::remove(path);
     return path;
 }
@@ -21,7 +21,7 @@ std::filesystem::path evaluation_db_path() {
 std::unique_ptr<Embedder> make_eval_embedder() {
     auto embedder = std::make_unique<MockEmbedder>(2, true, VectorMetric::Cosine);
     embedder->set_vector("Godot uses scenes and nodes for game structure.\n", {1.0f, 0.0f});
-    embedder->set_vector("SQLite stores structured local data in a single file.\n", {0.0f, 1.0f});
+    embedder->set_vector("libSQL stores structured local data in an embedded database file.\n", {0.0f, 1.0f});
     embedder->set_vector("llama.cpp provides local inference for GGUF models.\n", {0.8f, 0.2f});
     embedder->set_vector("How does Godot organize a game?", {1.0f, 0.0f});
     embedder->set_vector("What stores local structured data?", {0.0f, 1.0f});
@@ -51,7 +51,7 @@ int main() {
     const CorpusConfig config = make_eval_config(path);
 
     std::unique_ptr<CorpusStore> store;
-    if (auto err = make_sqlite_corpus_store(config, store)) {
+    if (auto err = make_libsql_corpus_store(config, store)) {
         std::cerr << "failed to create store: " << err.message << "\n";
         return 1;
     }
@@ -70,7 +70,7 @@ int main() {
         std::cerr << err.message << "\n";
         return 1;
     }
-    if (auto err = engine->upsert_text("doc-sqlite", "SQLite stores structured local data in a single file.\n", {},
+    if (auto err = engine->upsert_text("doc-libsql", "libSQL stores structured local data in an embedded database file.\n", {},
                                        ingest_stats, {}, {})) {
         std::cerr << err.message << "\n";
         return 1;
@@ -85,7 +85,7 @@ int main() {
 
     const std::vector<QueryCase> queries = {
             {"How does Godot organize a game?", "doc-godot"},
-            {"What stores local structured data?", "doc-sqlite"},
+            {"What stores local structured data?", "doc-libsql"},
             {"Which library runs local GGUF inference?", "doc-llama"},
     };
 
