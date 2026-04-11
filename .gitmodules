@@ -7,3 +7,6 @@
 [submodule "thirdparty/sqlite"]
 	path = thirdparty/sqlite
 	url = https://github.com/sqlite/sqlite.git
+[submodule "thirdparty/libsql"]
+	path = thirdparty/libsql
+	url = https://github.com/tursodatabase/libsql.git
