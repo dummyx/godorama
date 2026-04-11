@@ -207,6 +207,17 @@ size_t InferenceWorker::lora_adapter_count() const noexcept {
     return model_ ? model_->lora_adapter_count() : 0;
 }
 
+bool InferenceWorker::has_multimodal_session() const noexcept {
+    return config_.multimodal.has_value();
+}
+
+std::string InferenceWorker::multimodal_media_marker() const {
+    if (!config_.multimodal.has_value()) {
+        return std::string(kDefaultMediaMarker);
+    }
+    return config_.multimodal->media_marker.empty() ? std::string(kDefaultMediaMarker) : config_.multimodal->media_marker;
+}
+
 bool InferenceWorker::supports_image_input() const noexcept {
     return multimodal_.supports_vision();
 }
@@ -217,6 +228,31 @@ bool InferenceWorker::supports_audio_input() const noexcept {
 
 int32_t InferenceWorker::audio_input_sample_rate_hz() const noexcept {
     return multimodal_.audio_sample_rate_hz();
+}
+
+size_t InferenceWorker::pending_request_count() const {
+    std::lock_guard lock(mutex_);
+    return queue_.size();
+}
+
+std::optional<PendingRequestSnapshot> InferenceWorker::pending_request_snapshot(RequestId id) const {
+    std::lock_guard lock(mutex_);
+    for (const auto &req : queue_) {
+        if (!req || req->id != id) {
+            continue;
+        }
+
+        PendingRequestSnapshot snapshot;
+        snapshot.request_id = req->id;
+        snapshot.prompt = req->prompt;
+        snapshot.media_inputs = req->media_inputs;
+        snapshot.options = req->options;
+        snapshot.prompt_has_special_tokens = req->prompt_has_special_tokens;
+        snapshot.cancelled = req->is_cancelled();
+        return snapshot;
+    }
+
+    return std::nullopt;
 }
 
 void InferenceWorker::run() {
@@ -269,6 +305,8 @@ void InferenceWorker::process_request(GenerateRequest &req) {
     context_.clear_kv_cache();
 
     int32_t n_past = 0;
+    int32_t multimodal_token_count = 0;
+    const bool used_multimodal_input = !req.media_inputs.empty();
     if (!req.media_inputs.empty()) {
         if (!multimodal_.is_valid()) {
             if (callbacks_.on_error) {
@@ -279,14 +317,18 @@ void InferenceWorker::process_request(GenerateRequest &req) {
             return;
         }
 
-        auto err =
-                multimodal_.evaluate_prompt(context_.raw(), req.prompt, req.media_inputs, true, config_.n_batch, true, n_past);
+        MultimodalPromptEvaluation evaluation;
+        auto err = multimodal_.evaluate_prompt(context_.raw(), req.prompt, req.media_inputs, true, config_.n_batch,
+                                               true, evaluation);
         if (err) {
             if (callbacks_.on_error) {
                 callbacks_.on_error({req.id, err.code, err.message, err.context});
             }
             return;
         }
+
+        n_past = evaluation.n_past;
+        multimodal_token_count = evaluation.multimodal_token_count;
     } else {
         // Chat-template-formatted prompts contain special token syntax (e.g.
         // <|turn>, <turn|>) that must be parsed into their token IDs.  The
@@ -385,7 +427,9 @@ void InferenceWorker::process_request(GenerateRequest &req) {
                          : 0.0;
 
     if (callbacks_.on_complete) {
-        callbacks_.on_complete({req.id, std::move(full_text), tokens_generated, elapsed_ms, tps});
+        callbacks_.on_complete(
+                {req.id, std::move(full_text), tokens_generated, elapsed_ms, tps, multimodal_token_count,
+                 used_multimodal_input});
     }
 }
 

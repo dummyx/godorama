@@ -106,8 +106,8 @@ TEST_CASE("LlamaMultimodalHandle::evaluate_prompt fails when not initialized", "
     MultimodalInput input;
     input.path = "/test/image.jpg";
 
-    int32_t n_past = 0;
-    auto err = handle.evaluate_prompt(nullptr, "test prompt", {&input, 1}, true, 512, true, n_past);
+    MultimodalPromptEvaluation evaluation;
+    auto err = handle.evaluate_prompt(nullptr, "test prompt", {&input, 1}, true, 512, true, evaluation);
     REQUIRE(err);
     // When mtmd is not compiled in, this returns CapabilityUnavailable.
     // When mtmd is compiled in, this returns CapabilityUnavailable because ctx_ is null.
@@ -116,8 +116,8 @@ TEST_CASE("LlamaMultimodalHandle::evaluate_prompt fails when not initialized", "
 
 TEST_CASE("LlamaMultimodalHandle::evaluate_prompt with empty inputs span", "[multimodal_handle]") {
     LlamaMultimodalHandle handle;
-    int32_t n_past = 0;
-    auto err = handle.evaluate_prompt(nullptr, "test", {}, true, 512, true, n_past);
+    MultimodalPromptEvaluation evaluation;
+    auto err = handle.evaluate_prompt(nullptr, "test", {}, true, 512, true, evaluation);
     REQUIRE(err);
     REQUIRE(err.code == ErrorCode::CapabilityUnavailable);
 }

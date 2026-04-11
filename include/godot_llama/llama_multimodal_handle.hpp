@@ -16,6 +16,11 @@ namespace godot_llama {
 
 class LlamaModelHandle;
 
+struct MultimodalPromptEvaluation {
+    int32_t n_past = 0;
+    int32_t multimodal_token_count = 0;
+};
+
 class LlamaMultimodalHandle {
 public:
     LlamaMultimodalHandle() noexcept = default;
@@ -36,7 +41,8 @@ public:
     [[nodiscard]] const std::string &media_marker() const noexcept;
     [[nodiscard]] Error evaluate_prompt(llama_context *lctx, std::string_view prompt,
                                         std::span<const MultimodalInput> media_inputs, bool add_special,
-                                        int32_t n_batch, bool logits_last, int32_t &out_n_past) const;
+                                        int32_t n_batch, bool logits_last,
+                                        MultimodalPromptEvaluation &out_evaluation) const;
 
 private:
     mtmd_context *ctx_ = nullptr;

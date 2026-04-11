@@ -10,10 +10,20 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <thread>
 
 namespace godot_llama {
+
+struct PendingRequestSnapshot {
+    RequestId request_id = 0;
+    std::string prompt;
+    std::vector<MultimodalInput> media_inputs;
+    GenerateOptions options;
+    bool prompt_has_special_tokens = false;
+    bool cancelled = false;
+};
 
 // InferenceWorker runs generation requests on a background thread.
 // Thread-safe: submit/cancel can be called from any thread.
@@ -55,9 +65,13 @@ public:
     // Embedding (synchronous, blocking — use from worker or test code only)
     [[nodiscard]] Error embed(std::string_view text, std::vector<float> &out);
     [[nodiscard]] size_t lora_adapter_count() const noexcept;
+    [[nodiscard]] bool has_multimodal_session() const noexcept;
+    [[nodiscard]] std::string multimodal_media_marker() const;
     [[nodiscard]] bool supports_image_input() const noexcept;
     [[nodiscard]] bool supports_audio_input() const noexcept;
     [[nodiscard]] int32_t audio_input_sample_rate_hz() const noexcept;
+    [[nodiscard]] size_t pending_request_count() const;
+    [[nodiscard]] std::optional<PendingRequestSnapshot> pending_request_snapshot(RequestId id) const;
 
 private:
     void run();

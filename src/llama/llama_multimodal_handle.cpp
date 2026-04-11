@@ -3,8 +3,9 @@
 #include "godot_llama/llama_model_handle.hpp"
 
 #include <filesystem>
-#include <vector>
+#include <limits>
 #include <system_error>
+#include <vector>
 
 #if defined(GODOT_LLAMA_HAS_MTMD)
 #include <mtmd.h>
@@ -12,6 +13,40 @@
 #endif
 
 namespace godot_llama {
+
+namespace {
+
+size_t count_marker_occurrences(std::string_view text, std::string_view marker) {
+    if (marker.empty()) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(marker, pos)) != std::string_view::npos) {
+        ++count;
+        pos += marker.size();
+    }
+    return count;
+}
+
+std::string supported_format_hint(MultimodalInputType type) {
+    if (type == MultimodalInputType::Audio) {
+        return "Supported audio formats include WAV, MP3, and FLAC.";
+    }
+    return "Supported image formats include JPG, PNG, BMP, and GIF.";
+}
+
+std::string detected_extension(const MultimodalInput &input) {
+    if (input.path.empty()) {
+        return "<buffer>";
+    }
+
+    const auto extension = std::filesystem::path(input.path).extension().string();
+    return extension.empty() ? "<none>" : extension;
+}
+
+} // namespace
 
 LlamaMultimodalHandle::~LlamaMultimodalHandle() {
 #if defined(GODOT_LLAMA_HAS_MTMD)
@@ -127,7 +162,8 @@ const std::string &LlamaMultimodalHandle::media_marker() const noexcept {
 
 Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_view prompt,
                                              std::span<const MultimodalInput> media_inputs, bool add_special,
-                                             int32_t n_batch, bool logits_last, int32_t &out_n_past) const {
+                                             int32_t n_batch, bool logits_last,
+                                             MultimodalPromptEvaluation &out_evaluation) const {
 #if !defined(GODOT_LLAMA_HAS_MTMD)
     (void) lctx;
     (void) prompt;
@@ -135,10 +171,12 @@ Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_vi
     (void) add_special;
     (void) n_batch;
     (void) logits_last;
-    (void) out_n_past;
+    (void) out_evaluation;
     return Error::make(ErrorCode::CapabilityUnavailable,
                        "This build does not include llama.cpp libmtmd support");
 #else
+    out_evaluation = {};
+
     if (ctx_ == nullptr) {
         return Error::make(ErrorCode::CapabilityUnavailable,
                            "Multimodal projector is not initialized for this session");
@@ -176,7 +214,8 @@ Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_vi
                                                            input.data.size()));
         if (!bitmap.ptr) {
             return Error::make(ErrorCode::UnsupportedFormat,
-                               "Failed to load multimodal input: " + label);
+                               "Failed to load multimodal input: " + label,
+                               "extension=" + detected_extension(input) + ". " + supported_format_hint(input.type));
         }
 
         const bool is_audio = mtmd_bitmap_is_audio(bitmap.ptr.get());
@@ -217,9 +256,11 @@ Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_vi
     const int32_t tokenize_result =
             mtmd_tokenize(const_cast<mtmd_context *>(ctx_), chunks.ptr.get(), &text, bitmap_ptr_data, bitmap_ptrs.size());
     if (tokenize_result == 1) {
+        const size_t markers_found = count_marker_occurrences(prompt, media_marker_);
         return Error::make(ErrorCode::InvalidParameter,
                            "Number of media inputs does not match the number of multimodal media markers in the prompt",
-                           "Expected marker: " + media_marker_);
+                           "marker='" + media_marker_ + "', markers_found=" + std::to_string(markers_found) +
+                                   ", media_inputs=" + std::to_string(media_inputs.size()));
     }
     if (tokenize_result == 2) {
         return Error::make(ErrorCode::UnsupportedFormat,
@@ -231,6 +272,18 @@ Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_vi
                            "status=" + std::to_string(tokenize_result));
     }
 
+    size_t multimodal_token_count = 0;
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        const mtmd_input_chunk *chunk = chunks[i];
+        if (chunk == nullptr || mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+            continue;
+        }
+        multimodal_token_count += mtmd_input_chunk_get_n_tokens(chunk);
+    }
+    if (multimodal_token_count > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        return Error::make(ErrorCode::InternalError, "Multimodal token count exceeds supported range");
+    }
+
     llama_pos new_n_past = 0;
     const int32_t eval_result = mtmd_helper_eval_chunks(const_cast<mtmd_context *>(ctx_), lctx, chunks.ptr.get(), 0, 0,
                                                         n_batch, logits_last, &new_n_past);
@@ -240,7 +293,8 @@ Error LlamaMultimodalHandle::evaluate_prompt(llama_context *lctx, std::string_vi
                            "mtmd_helper_eval_chunks status=" + std::to_string(eval_result));
     }
 
-    out_n_past = static_cast<int32_t>(new_n_past);
+    out_evaluation.n_past = static_cast<int32_t>(new_n_past);
+    out_evaluation.multimodal_token_count = static_cast<int32_t>(multimodal_token_count);
     return Error::make_ok();
 #endif
 }

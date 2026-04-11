@@ -157,6 +157,8 @@ TEST_CASE("GenerateResult defaults", "[request][result]") {
     REQUIRE(result.tokens_generated == 0);
     REQUIRE(result.time_ms == 0.0);
     REQUIRE(result.tokens_per_second == 0.0);
+    REQUIRE(result.multimodal_token_count == 0);
+    REQUIRE_FALSE(result.used_multimodal_input);
 }
 
 TEST_CASE("GenerateResult field assignment", "[request][result]") {
@@ -166,12 +168,16 @@ TEST_CASE("GenerateResult field assignment", "[request][result]") {
     result.tokens_generated = 10;
     result.time_ms = 150.5;
     result.tokens_per_second = 66.4;
+    result.multimodal_token_count = 384;
+    result.used_multimodal_input = true;
 
     REQUIRE(result.request_id == 7);
     REQUIRE(result.full_text == "Hello world");
     REQUIRE(result.tokens_generated == 10);
     REQUIRE(result.time_ms == Catch::Approx(150.5));
     REQUIRE(result.tokens_per_second == Catch::Approx(66.4));
+    REQUIRE(result.multimodal_token_count == 384);
+    REQUIRE(result.used_multimodal_input);
 }
 
 TEST_CASE("GenerateResult tokens_per_second calculation", "[request][result]") {

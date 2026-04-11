@@ -19,6 +19,8 @@ struct GenerateResult {
     int32_t tokens_generated = 0;
     double time_ms = 0.0;
     double tokens_per_second = 0.0;
+    int32_t multimodal_token_count = 0;
+    bool used_multimodal_input = false;
 };
 
 struct TokenEvent {

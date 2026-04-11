@@ -17,11 +17,14 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace godot {
 
+class Image;
 class LlamaModelConfig;
 class LlamaLoraAdapterConfig;
 class LlamaMultimodalConfig;
@@ -54,6 +57,7 @@ public:
     int generate_multimodal_messages_async(const Array &messages, const Array &media_inputs,
                                            const Dictionary &options = Dictionary(),
                                            bool add_assistant_turn = true);
+    static Dictionary image_to_media_input(const Ref<Image> &image);
 
     // Non-blocking: cancels a pending or in-progress generation.
     void cancel(int request_id);
@@ -72,6 +76,7 @@ public:
     bool supports_image_input() const;
     bool supports_audio_input() const;
     int get_audio_input_sample_rate_hz() const;
+    int get_multimodal_token_count(int request_id) const;
 
     // Called by Godot each frame to flush queued events to signals.
     void poll();
@@ -83,7 +88,9 @@ private:
     godot_llama::ModelConfig to_internal_config(const Ref<Resource> &config) const;
     godot_llama::GenerateOptions to_internal_options(const Dictionary &options) const;
     std::vector<std::pair<std::string, std::string>> to_internal_messages(const Array &messages) const;
-    std::vector<godot_llama::MultimodalInput> to_internal_media_inputs(const Array &media_inputs) const;
+    godot_llama::Error to_internal_media_inputs(const Array &media_inputs,
+                                                std::vector<godot_llama::MultimodalInput> &out_media_inputs) const;
+    godot_llama::Error validate_multimodal_marker_count(std::string_view prompt, size_t media_input_count) const;
     void enqueue_opened_event();
     void enqueue_open_failed_event(const godot_llama::Error &error);
     void finalize_open_thread() noexcept;
@@ -117,6 +124,9 @@ private:
     std::vector<QueuedCompleteEvent> complete_events_;
     std::vector<QueuedErrorEvent> error_events_;
     std::vector<QueuedCancelEvent> cancel_events_;
+
+    mutable std::mutex multimodal_stats_mutex_;
+    std::unordered_map<int, int> completed_multimodal_token_counts_;
 
     mutable std::mutex state_mutex_;
     std::unique_ptr<godot_llama::InferenceWorker> worker_;

@@ -5,9 +5,64 @@
 #include "llama_model_config.hpp"
 #include "llama_multimodal_config.hpp"
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <filesystem>
+#include <fstream>
+
 namespace godot {
+
+namespace {
+
+std::string to_utf8_string(const String &value) {
+    const CharString utf8 = value.utf8();
+    return std::string(utf8.get_data(), static_cast<size_t>(utf8.length()));
+}
+
+size_t count_marker_occurrences(std::string_view text, std::string_view marker) {
+    if (marker.empty()) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(marker, pos)) != std::string_view::npos) {
+        ++count;
+        pos += marker.size();
+    }
+    return count;
+}
+
+godot_llama::Error validate_readable_file_path(std::string_view path) {
+    namespace fs = std::filesystem;
+
+    if (path.empty()) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidPath, "Multimodal input path is empty");
+    }
+
+    const std::string path_string(path);
+    const fs::path fs_path(path_string);
+    std::error_code ec;
+    if (!fs::exists(fs_path, ec) || ec) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidPath,
+                                        "Multimodal input file does not exist: " + path_string);
+    }
+    if (!fs::is_regular_file(fs_path, ec) || ec) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidPath,
+                                        "Multimodal input path is not a regular file: " + path_string);
+    }
+
+    std::ifstream stream(fs_path, std::ios::binary);
+    if (!stream.good()) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidPath,
+                                        "Multimodal input file is not readable: " + path_string);
+    }
+
+    return godot_llama::Error::make_ok();
+}
+
+} // namespace
 
 LlamaSession::LlamaSession() : worker_(std::make_unique<godot_llama::InferenceWorker>()) {}
 
@@ -29,6 +84,8 @@ void LlamaSession::_bind_methods() {
     ClassDB::bind_method(D_METHOD("generate_multimodal_messages_async", "messages", "media_inputs", "options",
                                   "add_assistant_turn"),
                          &LlamaSession::generate_multimodal_messages_async, DEFVAL(Dictionary()), DEFVAL(true));
+    ClassDB::bind_static_method("LlamaSession", D_METHOD("image_to_media_input", "image"),
+                                &LlamaSession::image_to_media_input);
     ClassDB::bind_method(D_METHOD("cancel", "request_id"), &LlamaSession::cancel);
     ClassDB::bind_method(D_METHOD("tokenize", "text", "add_bos", "special"), &LlamaSession::tokenize, DEFVAL(false),
                          DEFVAL(false));
@@ -38,6 +95,8 @@ void LlamaSession::_bind_methods() {
     ClassDB::bind_method(D_METHOD("supports_image_input"), &LlamaSession::supports_image_input);
     ClassDB::bind_method(D_METHOD("supports_audio_input"), &LlamaSession::supports_audio_input);
     ClassDB::bind_method(D_METHOD("get_audio_input_sample_rate_hz"), &LlamaSession::get_audio_input_sample_rate_hz);
+    ClassDB::bind_method(D_METHOD("get_multimodal_token_count", "request_id"),
+                         &LlamaSession::get_multimodal_token_count);
     ClassDB::bind_method(D_METHOD("poll"), &LlamaSession::poll);
 
     ADD_SIGNAL(MethodInfo("opened"));
@@ -95,6 +154,11 @@ int LlamaSession::open(const Ref<Resource> &config) {
             stats["tokens_generated"] = res.tokens_generated;
             stats["time_ms"] = res.time_ms;
             stats["tokens_per_second"] = res.tokens_per_second;
+            if (res.used_multimodal_input) {
+                stats["multimodal_token_count"] = res.multimodal_token_count;
+                std::lock_guard stats_lock(multimodal_stats_mutex_);
+                completed_multimodal_token_counts_[res.request_id] = res.multimodal_token_count;
+            }
 
             std::lock_guard lock(event_mutex_);
             complete_events_.push_back(
@@ -157,10 +221,15 @@ void LlamaSession::close() {
 
     std::lock_guard lock(state_mutex_);
     if (!is_open_.exchange(false, std::memory_order_acq_rel)) {
+        std::lock_guard stats_lock(multimodal_stats_mutex_);
+        completed_multimodal_token_counts_.clear();
         return;
     }
 
     worker_->stop();
+
+    std::lock_guard stats_lock(multimodal_stats_mutex_);
+    completed_multimodal_token_counts_.clear();
 }
 
 bool LlamaSession::is_open() const {
@@ -218,14 +287,20 @@ int LlamaSession::generate_multimodal_async(const String &prompt, const Array &m
         return -1;
     }
 
-    const auto internal_media = to_internal_media_inputs(media_inputs);
-    if (internal_media.empty()) {
-        UtilityFunctions::push_error("LlamaSession: media_inputs must contain at least one valid {path, type} entry");
-        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    std::vector<godot_llama::MultimodalInput> internal_media;
+    const auto media_err = to_internal_media_inputs(media_inputs, internal_media);
+    if (media_err) {
+        UtilityFunctions::push_error(String("LlamaSession generate_multimodal_async: ") + media_err.message.c_str());
+        return -static_cast<int>(media_err.code);
     }
 
-    auto utf8 = prompt.utf8();
-    std::string prompt_str(utf8.get_data(), static_cast<size_t>(utf8.length()));
+    std::string prompt_str = to_utf8_string(prompt);
+    const auto marker_err = validate_multimodal_marker_count(prompt_str, internal_media.size());
+    if (marker_err) {
+        UtilityFunctions::push_error(String("LlamaSession generate_multimodal_async: ") + marker_err.message.c_str());
+        return -static_cast<int>(marker_err.code);
+    }
+
     auto opts = to_internal_options(options);
 
     return worker_->submit_multimodal(std::move(prompt_str), std::move(internal_media), std::move(opts));
@@ -244,10 +319,12 @@ int LlamaSession::generate_multimodal_messages_async(const Array &messages, cons
         return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
     }
 
-    const auto internal_media = to_internal_media_inputs(media_inputs);
-    if (internal_media.empty()) {
-        UtilityFunctions::push_error("LlamaSession: media_inputs must contain at least one valid {path, type} entry");
-        return -static_cast<int>(godot_llama::ErrorCode::InvalidParameter);
+    std::vector<godot_llama::MultimodalInput> internal_media;
+    const auto media_err = to_internal_media_inputs(media_inputs, internal_media);
+    if (media_err) {
+        UtilityFunctions::push_error(
+                String("LlamaSession generate_multimodal_messages_async: ") + media_err.message.c_str());
+        return -static_cast<int>(media_err.code);
     }
 
     std::string prompt;
@@ -259,12 +336,37 @@ int LlamaSession::generate_multimodal_messages_async(const Array &messages, cons
         return -static_cast<int>(template_err.code);
     }
 
+    const auto marker_err = validate_multimodal_marker_count(prompt, internal_media.size());
+    if (marker_err) {
+        UtilityFunctions::push_error(
+                String("LlamaSession generate_multimodal_messages_async: ") + marker_err.message.c_str());
+        return -static_cast<int>(marker_err.code);
+    }
+
     auto opts = to_internal_options(options);
     for (auto &s : template_stops) {
         opts.stop.push_back(std::move(s));
     }
     return worker_->submit_multimodal(std::move(prompt), std::move(internal_media), std::move(opts),
                                       /* prompt_has_special_tokens */ true);
+}
+
+Dictionary LlamaSession::image_to_media_input(const Ref<Image> &image) {
+    Dictionary media_input;
+    if (image.is_null()) {
+        UtilityFunctions::push_error("LlamaSession.image_to_media_input: image is null");
+        return media_input;
+    }
+
+    const PackedByteArray bytes = image->save_png_to_buffer();
+    if (bytes.size() == 0) {
+        UtilityFunctions::push_error("LlamaSession.image_to_media_input: failed to encode image as PNG");
+        return media_input;
+    }
+
+    media_input["data"] = bytes;
+    media_input["type"] = "image";
+    return media_input;
 }
 
 void LlamaSession::cancel(int request_id) {
@@ -343,6 +445,12 @@ bool LlamaSession::supports_audio_input() const {
 int LlamaSession::get_audio_input_sample_rate_hz() const {
     std::lock_guard lock(state_mutex_);
     return worker_ ? worker_->audio_input_sample_rate_hz() : -1;
+}
+
+int LlamaSession::get_multimodal_token_count(int request_id) const {
+    std::lock_guard lock(multimodal_stats_mutex_);
+    const auto it = completed_multimodal_token_counts_.find(request_id);
+    return it == completed_multimodal_token_counts_.end() ? -1 : it->second;
 }
 
 void LlamaSession::poll() {
@@ -529,19 +637,28 @@ std::vector<std::pair<std::string, std::string>> LlamaSession::to_internal_messa
     return internal_messages;
 }
 
-std::vector<godot_llama::MultimodalInput> LlamaSession::to_internal_media_inputs(const Array &media_inputs) const {
-    std::vector<godot_llama::MultimodalInput> result;
-    result.reserve(static_cast<size_t>(media_inputs.size()));
+godot_llama::Error LlamaSession::to_internal_media_inputs(
+        const Array &media_inputs, std::vector<godot_llama::MultimodalInput> &out_media_inputs) const {
+    out_media_inputs.clear();
+    out_media_inputs.reserve(static_cast<size_t>(media_inputs.size()));
+
+    if (media_inputs.size() == 0) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                        "media_inputs must contain at least one Dictionary entry");
+    }
 
     for (int64_t i = 0; i < media_inputs.size(); ++i) {
         const Variant &entry = media_inputs[i];
         if (entry.get_type() != Variant::DICTIONARY) {
-            continue;
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) + "] must be a Dictionary");
         }
 
         const Dictionary media = entry;
         if (!media.has("path") && !media.has("data")) {
-            continue;
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) +
+                                                    "] must define 'path' or 'data'");
         }
 
         godot_llama::MultimodalInput input;
@@ -552,14 +669,23 @@ std::vector<godot_llama::MultimodalInput> LlamaSession::to_internal_media_inputs
             }
         }
 
+        if (media.has("path") && media["path"].get_type() != Variant::STRING && media["path"].get_type() != Variant::NIL) {
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) + "].path must be a String");
+        }
         if (media.has("path")) {
             const String path = String(media["path"]).strip_edges();
             if (!path.is_empty()) {
-                auto path_utf8 = path.utf8();
-                input.path = std::string(path_utf8.get_data(), static_cast<size_t>(path_utf8.length()));
+                input.path = to_utf8_string(path);
             }
         }
 
+        if (media.has("data") && media["data"].get_type() != Variant::PACKED_BYTE_ARRAY &&
+            media["data"].get_type() != Variant::NIL) {
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) +
+                                                    "].data must be a PackedByteArray");
+        }
         if (media.has("data")) {
             const PackedByteArray bytes = media["data"];
             if (bytes.size() > 0) {
@@ -568,21 +694,61 @@ std::vector<godot_llama::MultimodalInput> LlamaSession::to_internal_media_inputs
             }
         }
 
+        if (media.has("id") && media["id"].get_type() != Variant::STRING && media["id"].get_type() != Variant::NIL) {
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) + "].id must be a String");
+        }
         if (media.has("id")) {
             const String id = String(media["id"]).strip_edges();
             if (!id.is_empty()) {
-                auto id_utf8 = id.utf8();
-                input.id = std::string(id_utf8.get_data(), static_cast<size_t>(id_utf8.length()));
+                input.id = to_utf8_string(id);
             }
         }
 
-        // Accept entries that have either a path or in-memory data
-        if (!input.path.empty() || !input.data.empty()) {
-            result.push_back(std::move(input));
+        if (input.data.empty() && input.path.empty()) {
+            return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                            "media_inputs[" + std::to_string(i) +
+                                                    "] must provide a non-empty path or data buffer");
         }
+
+        if (input.data.empty()) {
+            const auto path_err = validate_readable_file_path(input.path);
+            if (path_err) {
+                return path_err;
+            }
+        }
+
+        out_media_inputs.push_back(std::move(input));
     }
 
-    return result;
+    if (out_media_inputs.empty()) {
+        return godot_llama::Error::make(godot_llama::ErrorCode::InvalidParameter,
+                                        "media_inputs must contain at least one valid entry");
+    }
+
+    return godot_llama::Error::make_ok();
+}
+
+godot_llama::Error LlamaSession::validate_multimodal_marker_count(std::string_view prompt,
+                                                                  size_t media_input_count) const {
+    std::string marker;
+    {
+        std::lock_guard lock(state_mutex_);
+        if (!worker_ || !worker_->has_multimodal_session()) {
+            return godot_llama::Error::make_ok();
+        }
+        marker = worker_->multimodal_media_marker();
+    }
+
+    const size_t marker_count = count_marker_occurrences(prompt, marker);
+    if (marker_count == media_input_count) {
+        return godot_llama::Error::make_ok();
+    }
+
+    return godot_llama::Error::make(
+            godot_llama::ErrorCode::InvalidParameter,
+            "Prompt contains " + std::to_string(marker_count) + " occurrences of media marker '" + marker +
+                    "' but received " + std::to_string(media_input_count) + " media input(s)");
 }
 
 } // namespace godot
