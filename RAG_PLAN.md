@@ -2,7 +2,7 @@
 
 ## Context
 
-The previous `sqlite-vector` plan is retired.
+The previous vector-storage migration plan is retired.
 
 It had three problems for this repository:
 
@@ -412,7 +412,7 @@ results.
 
 ### Index lifecycle
 
-Unlike the retired `sqlite-vector` plan, libSQL vector indexes are part of the
+Unlike the retired earlier plan, libSQL vector indexes are part of the
 engine and are updated automatically with base-table writes.
 
 Still verify this explicitly in tests for:
