@@ -30,8 +30,17 @@ static bool llama_backend_initialized = false;
 
 namespace {
 
-std::mutex s_llama_log_mutex;
-std::optional<ggml_log_level> s_pending_log_level;
+struct LlamaLogState {
+    std::mutex mutex;
+    std::optional<ggml_log_level> pending_log_level;
+};
+
+LlamaLogState &llama_log_state() {
+    // Keep the callback state alive until process exit so late llama/ggml teardown
+    // logs cannot race static destruction of the mutex.
+    static auto *state = new LlamaLogState();
+    return *state;
+}
 
 ggml_log_level resolve_llama_log_threshold() {
     const char *raw = std::getenv("GODORAMA_LLAMA_LOG_LEVEL");
@@ -67,11 +76,12 @@ void godorama_llama_log_callback(enum ggml_log_level level, const char *text, vo
     (void) user_data;
 
     static const ggml_log_level threshold = resolve_llama_log_threshold();
+    LlamaLogState &state = llama_log_state();
 
-    std::lock_guard<std::mutex> lock(s_llama_log_mutex);
+    std::lock_guard<std::mutex> lock(state.mutex);
 
     if (level == GGML_LOG_LEVEL_CONT) {
-        if (!s_pending_log_level.has_value() || s_pending_log_level.value() < threshold) {
+        if (!state.pending_log_level.has_value() || state.pending_log_level.value() < threshold) {
             return;
         }
         std::fputs(text, stderr);
@@ -79,7 +89,7 @@ void godorama_llama_log_callback(enum ggml_log_level level, const char *text, vo
         return;
     }
 
-    s_pending_log_level = level;
+    state.pending_log_level = level;
     if (level < threshold) {
         return;
     }
@@ -118,7 +128,11 @@ void uninitialize_godot_llama_module(ModuleInitializationLevel p_level) {
 
     if (llama_backend_initialized) {
         llama_log_set(nullptr, nullptr);
-        llama_backend_free();
+        // On macOS headless runs we have observed shutdown-time
+        // std::system_error("mutex lock failed") crashes inside or after
+        // backend teardown. The process is already exiting here, so favor a
+        // stable shutdown over aggressively freeing llama's global backend
+        // state.
         llama_backend_initialized = false;
     }
 }

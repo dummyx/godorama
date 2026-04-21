@@ -9,11 +9,25 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 
 namespace godot_llama {
 namespace {
+
+struct ModelHandleCacheState {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::shared_ptr<LlamaModelHandle>> handles;
+};
+
+ModelHandleCacheState &model_handle_cache_state() {
+    // Keep the cache alive until process exit so shared GGUF handles are not
+    // torn down during fragile native shutdown on macOS headless runs.
+    static auto *state = new ModelHandleCacheState();
+    return *state;
+}
 
 std::string fnv1a_hex(std::string_view value) {
     constexpr uint64_t offset = 14695981039346656037ull;
@@ -43,6 +57,43 @@ std::string llama_string_from_callback(const std::function<int32_t(char *, size_
     std::vector<char> buffer(static_cast<size_t>(len) + 1, '\0');
     cb(buffer.data(), buffer.size());
     return {buffer.data(), static_cast<size_t>(len)};
+}
+
+void append_cache_key_value(std::string &key, std::string_view name, std::string_view value) {
+    key.append(name);
+    key.push_back('=');
+    key.append(value);
+    key.push_back('\n');
+}
+
+void append_cache_key_bool(std::string &key, std::string_view name, bool value) {
+    append_cache_key_value(key, name, value ? "1" : "0");
+}
+
+void append_cache_key_i32(std::string &key, std::string_view name, int32_t value) {
+    append_cache_key_value(key, name, std::to_string(value));
+}
+
+std::string make_model_cache_key(const ModelConfig &config) {
+    std::string key;
+    key.reserve(256 + config.model_path.size() + config.chat_template_override.size() +
+                config.lora_adapters.size() * 64);
+
+    append_cache_key_value(key, "model_path", config.model_path);
+    append_cache_key_i32(key, "n_gpu_layers", config.n_gpu_layers);
+    append_cache_key_bool(key, "use_mmap", config.use_mmap);
+    append_cache_key_bool(key, "use_mlock", config.use_mlock);
+    append_cache_key_value(key, "chat_template_override", config.chat_template_override);
+    append_cache_key_i32(key, "lora_count", static_cast<int32_t>(config.lora_adapters.size()));
+
+    for (size_t index = 0; index < config.lora_adapters.size(); ++index) {
+        const auto &adapter = config.lora_adapters[index];
+        const std::string prefix = "lora_" + std::to_string(index) + "_";
+        append_cache_key_value(key, prefix + "path", adapter.path);
+        append_cache_key_value(key, prefix + "scale", std::to_string(adapter.scale));
+    }
+
+    return key;
 }
 
 } // namespace
@@ -100,6 +151,17 @@ Error LlamaModelHandle::load(const ModelConfig &config, std::shared_ptr<LlamaMod
         return Error::make(ErrorCode::InvalidPath, "Model file does not exist: " + config.model_path);
     }
 
+    const std::string cache_key = make_model_cache_key(config);
+    ModelHandleCacheState &cache_state = model_handle_cache_state();
+    {
+        std::lock_guard<std::mutex> lock(cache_state.mutex);
+        const auto cached = cache_state.handles.find(cache_key);
+        if (cached != cache_state.handles.end()) {
+            out = cached->second;
+            return Error::make_ok();
+        }
+    }
+
     auto params = llama_model_default_params();
     params.n_gpu_layers = config.n_gpu_layers;
     params.use_mmap = config.use_mmap;
@@ -121,6 +183,16 @@ Error LlamaModelHandle::load(const ModelConfig &config, std::shared_ptr<LlamaMod
     if (template_err) {
         return template_err;
     }
+
+    {
+        std::lock_guard<std::mutex> lock(cache_state.mutex);
+        const auto [it, inserted] = cache_state.handles.emplace(cache_key, handle);
+        if (!inserted) {
+            out = it->second;
+            return Error::make_ok();
+        }
+    }
+
     out = std::move(handle);
     return Error::make_ok();
 }
