@@ -20,6 +20,7 @@ bool should_abort_callback(void *data) {
 } // namespace
 
 LlamaContextHandle::~LlamaContextHandle() {
+    free_embedding_batch();
     if (ctx_) {
         llama_set_abort_callback(ctx_, nullptr, nullptr);
         llama_free(ctx_);
@@ -31,29 +32,80 @@ LlamaContextHandle::~LlamaContextHandle() {
 
 LlamaContextHandle::LlamaContextHandle(LlamaContextHandle &&other) noexcept
         : ctx_(other.ctx_),
+          embedding_batch_(std::move(other.embedding_batch_)),
+          embedding_batch_token_capacity_(other.embedding_batch_token_capacity_),
+          embedding_batch_hidden_size_(other.embedding_batch_hidden_size_),
           model_(std::move(other.model_)),
           abort_flag_(other.abort_flag_),
           embeddings_enabled_(other.embeddings_enabled_) {
     other.ctx_ = nullptr;
+    other.embedding_batch_token_capacity_ = 0;
+    other.embedding_batch_hidden_size_ = 0;
     other.abort_flag_ = nullptr;
     other.embeddings_enabled_ = false;
 }
 
 LlamaContextHandle &LlamaContextHandle::operator=(LlamaContextHandle &&other) noexcept {
     if (this != &other) {
+        free_embedding_batch();
         if (ctx_) {
             llama_set_abort_callback(ctx_, nullptr, nullptr);
             llama_free(ctx_);
         }
         ctx_ = other.ctx_;
+        embedding_batch_ = std::move(other.embedding_batch_);
+        embedding_batch_token_capacity_ = other.embedding_batch_token_capacity_;
+        embedding_batch_hidden_size_ = other.embedding_batch_hidden_size_;
         model_ = std::move(other.model_);
         abort_flag_ = other.abort_flag_;
         embeddings_enabled_ = other.embeddings_enabled_;
         other.ctx_ = nullptr;
+        other.embedding_batch_token_capacity_ = 0;
+        other.embedding_batch_hidden_size_ = 0;
         other.abort_flag_ = nullptr;
         other.embeddings_enabled_ = false;
     }
     return *this;
+}
+
+void LlamaContextHandle::LlamaBatchDeleter::operator()(llama_batch *batch) const noexcept {
+    if (batch) {
+        llama_batch_free(*batch);
+        delete batch;
+    }
+}
+
+void LlamaContextHandle::free_embedding_batch() noexcept {
+    embedding_batch_.reset();
+    embedding_batch_token_capacity_ = 0;
+    embedding_batch_hidden_size_ = 0;
+}
+
+Error LlamaContextHandle::ensure_embedding_batch(int32_t token_count, int32_t hidden_size) {
+    if (token_count <= 0 || hidden_size <= 0) {
+        return Error::make(ErrorCode::InvalidParameter, "Embedding batch dimensions must be positive");
+    }
+    if (embedding_batch_ &&
+        token_count <= embedding_batch_token_capacity_ &&
+        hidden_size == embedding_batch_hidden_size_) {
+        return Error::make_ok();
+    }
+
+    free_embedding_batch();
+
+    embedding_batch_.reset(new llama_batch(llama_batch_init(token_count, hidden_size, 1)));
+    if (!embedding_batch_->embd ||
+        !embedding_batch_->pos ||
+        !embedding_batch_->n_seq_id ||
+        !embedding_batch_->seq_id ||
+        !embedding_batch_->logits) {
+        free_embedding_batch();
+        return Error::make(ErrorCode::InternalError, "Failed to allocate llama batch for embedding decode");
+    }
+
+    embedding_batch_token_capacity_ = token_count;
+    embedding_batch_hidden_size_ = hidden_size;
+    return Error::make_ok();
 }
 
 Error LlamaContextHandle::create(const std::shared_ptr<LlamaModelHandle> &model, const ModelConfig &config,
@@ -184,12 +236,12 @@ Error LlamaContextHandle::decode_embeddings(std::span<const float> embeddings, i
 
     int32_t result = 0;
     if (position_components == 1) {
-        llama_batch batch = llama_batch_init(token_count, hidden_size, 1);
-        if (!batch.embd || !batch.pos || !batch.n_seq_id || !batch.seq_id || !batch.logits) {
-            llama_batch_free(batch);
-            return Error::make(ErrorCode::InternalError, "Failed to allocate llama batch for embedding decode");
+        const auto batch_err = ensure_embedding_batch(token_count, hidden_size);
+        if (batch_err) {
+            return batch_err;
         }
 
+        llama_batch &batch = *embedding_batch_;
         batch.n_tokens = token_count;
         std::copy(embeddings.begin(), embeddings.end(), batch.embd);
         std::copy(positions.begin(), positions.end(), batch.pos);
@@ -200,7 +252,6 @@ Error LlamaContextHandle::decode_embeddings(std::span<const float> embeddings, i
         }
 
         result = llama_decode(ctx_, batch);
-        llama_batch_free(batch);
     } else {
         std::vector<llama_pos> pos_storage(positions.begin(), positions.end());
         std::vector<int32_t> n_seq_id(static_cast<size_t>(token_count), 1);

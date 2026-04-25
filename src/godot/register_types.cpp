@@ -98,6 +98,50 @@ void godorama_llama_log_callback(enum ggml_log_level level, const char *text, vo
     std::fflush(stderr);
 }
 
+const char *ggml_backend_device_type_name(enum ggml_backend_dev_type type) {
+    switch (type) {
+        case GGML_BACKEND_DEVICE_TYPE_CPU:
+            return "CPU";
+        case GGML_BACKEND_DEVICE_TYPE_GPU:
+            return "GPU";
+        case GGML_BACKEND_DEVICE_TYPE_IGPU:
+            return "IGPU";
+        case GGML_BACKEND_DEVICE_TYPE_ACCEL:
+            return "ACCEL";
+    }
+
+    return "UNKNOWN";
+}
+
+void log_ggml_backend_devices() {
+    char buffer[512];
+    const size_t device_count = ggml_backend_dev_count();
+
+    std::snprintf(buffer, sizeof(buffer), "godorama: registered %zu ggml backend device(s)\n", device_count);
+    godorama_llama_log_callback(GGML_LOG_LEVEL_INFO, buffer, nullptr);
+
+    for (size_t i = 0; i < device_count; ++i) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(i);
+        const char *name = ggml_backend_dev_name(device);
+        const char *description = ggml_backend_dev_description(device);
+        const char *type_name = ggml_backend_device_type_name(ggml_backend_dev_type(device));
+
+        std::snprintf(buffer, sizeof(buffer),
+                      "godorama: ggml device %zu: name=%s type=%s description=%s\n",
+                      i,
+                      name != nullptr ? name : "(null)",
+                      type_name,
+                      description != nullptr ? description : "(null)");
+        godorama_llama_log_callback(GGML_LOG_LEVEL_INFO, buffer, nullptr);
+    }
+
+    if (!llama_supports_gpu_offload()) {
+        godorama_llama_log_callback(GGML_LOG_LEVEL_WARN,
+                                    "godorama: no ggml GPU backend device registered; GGUF inference will run on CPU\n",
+                                    nullptr);
+    }
+}
+
 } // namespace
 
 void initialize_godot_llama_module(ModuleInitializationLevel p_level) {
@@ -106,8 +150,10 @@ void initialize_godot_llama_module(ModuleInitializationLevel p_level) {
     }
 
     if (!llama_backend_initialized) {
-        llama_backend_init();
         llama_log_set(godorama_llama_log_callback, nullptr);
+        ggml_backend_load_all();
+        llama_backend_init();
+        log_ggml_backend_devices();
         llama_backend_initialized = true;
     }
 

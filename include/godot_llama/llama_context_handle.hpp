@@ -10,6 +10,7 @@
 #include <vector>
 
 struct llama_context;
+struct llama_batch;
 
 namespace godot_llama {
 
@@ -48,7 +49,17 @@ public:
     [[nodiscard]] int32_t n_ctx() const noexcept;
 
 private:
+    struct LlamaBatchDeleter {
+        void operator()(llama_batch *batch) const noexcept;
+    };
+
+    void free_embedding_batch() noexcept;
+    [[nodiscard]] Error ensure_embedding_batch(int32_t token_count, int32_t hidden_size);
+
     llama_context *ctx_ = nullptr;
+    std::unique_ptr<llama_batch, LlamaBatchDeleter> embedding_batch_;
+    int32_t embedding_batch_token_capacity_ = 0;
+    int32_t embedding_batch_hidden_size_ = 0;
     std::shared_ptr<LlamaModelHandle> model_;
     const std::atomic<bool> *abort_flag_ = nullptr;
     bool embeddings_enabled_ = false;
